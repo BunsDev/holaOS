@@ -92,7 +92,11 @@ Install apps from the in-workspace marketplace and they open as **real, interact
 - **One click to install** — browse the in-workspace marketplace and open any app instantly.
 
 <p align="center">
-  <img src="docs/images/desktop-workspace1.png" alt="A HolaApp open side-by-side with the agent working in the holaOS workspace" width="1280" />
+  <img src="docs/images/marketplace.png" alt="The holaOS in-workspace app marketplace" width="1280" />
+</p>
+
+<p align="center">
+  <img src="docs/images/hola-app-example.png" alt="The Notion HolaApp open side-by-side with the agent navigating it in holaOS" width="1280" />
 </p>
 
 ### 🛠️ Your entire workstation, agent-operable
@@ -103,6 +107,10 @@ Install apps from the in-workspace marketplace and they open as **real, interact
 - **📄 Real deliverables** — reports, spreadsheets, and slides saved as real `.xlsx`, `.pptx`, and `.docx` files you can send, not text stuck in a chat.
 - **💬 Reach it from anywhere you chat** — Feishu, WeChat, Slack, Telegram. Send a task from any thread; the result comes back to the same thread.
 - **⏰ Automation** — run on a schedule or a trigger. Digests, monitors, and reports finish and file themselves.
+
+<p align="center">
+  <img src="docs/images/desktop-workspace1.png" alt="The agent driving a real browser side-by-side in the holaOS workspace" width="1280" />
+</p>
 
 ---
 
