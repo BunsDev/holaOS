@@ -78,11 +78,6 @@ Start with **high-performance models built in** (Kimi, GLM, and more) at a fract
 - **BYOK when you want it** — your keys, your providers, your rates.
 - **Right model per task** — pick per job, per agent.
 
-### 🧩 Skills & Combos — teach it once, reuse everywhere
-
-- **Skills** — package a workflow once; any agent runs it on demand.
-- **Combos** — bundle skills and integrations into a single one-click install.
-
 ### 🪟 HolaApps — apps and agent, side by side
 
 Install apps from the in-workspace marketplace and they open as **real, interactive surfaces right beside your agent.** Watch it work inside the app, step in whenever you want, and the result lands in place — not a wall of chat text, but the actual app, driven by the agent, next to the agent.
@@ -92,11 +87,16 @@ Install apps from the in-workspace marketplace and they open as **real, interact
 - **One click to install** — browse the in-workspace marketplace and open any app instantly.
 
 <p align="center">
-  <img src="docs/images/marketplace.png" alt="The holaOS in-workspace app marketplace" width="1280" />
+  <img src="docs/images/hola-app-example.png" alt="The Notion HolaApp open side-by-side with the agent navigating it in holaOS" width="1280" />
 </p>
 
+### 🧩 Skills & Combos — teach it once, reuse everywhere
+
+- **Skills** — package a workflow once; any agent runs it on demand.
+- **Combos** — bundle skills and integrations into a single one-click install.
+
 <p align="center">
-  <img src="docs/images/hola-app-example.png" alt="The Notion HolaApp open side-by-side with the agent navigating it in holaOS" width="1280" />
+  <img src="docs/images/marketplace.png" alt="The holaOS in-workspace app marketplace" width="1280" />
 </p>
 
 ### 🛠️ Your entire workstation, agent-operable
