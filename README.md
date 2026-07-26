@@ -90,8 +90,10 @@ Install apps from the in-workspace marketplace and they open as **real, interact
   <img src="docs/images/hola-app-example.png" alt="The Notion HolaApp open side-by-side with the agent navigating it in holaOS" width="1280" />
 </p>
 
-### 🧩 Skills & Combos — teach it once, reuse everywhere
+### 🧩 Skills, Integrations & MCP — teach it once, reuse everywhere
 
+- **Integrations** — connect Gmail, Notion, Slack, GitHub, Linear and 100+ more with one-click OAuth. Agents read and act across your tools, no glue code — and every agent inherits the same connections.
+- **MCP** — plug in any Model Context Protocol server to give your agents new tools. Bring your own, or install community MCP servers in one click.
 - **Skills** — package a workflow once; any agent runs it on demand.
 - **Combos** — bundle skills and integrations into a single one-click install.
 
@@ -101,7 +103,6 @@ Install apps from the in-workspace marketplace and they open as **real, interact
 
 ### 🛠️ Your entire workstation, agent-operable
 
-- **🔌 Your tools, zero glue code** — Gmail, Notion, Slack, GitHub, Linear and more. Connect once with OAuth; agents read and act across them.
 - **🌐 A real browser, driven by agents** — signed-in browsers your agents drive to browse, click, and extract — under your control.
 - **🎨 Frontier generation built in** — the latest image, video, and audio models inside every agent. Storyboard a video, design a poster, voice a script — one prompt.
 - **📄 Real deliverables** — reports, spreadsheets, and slides saved as real `.xlsx`, `.pptx`, and `.docx` files you can send, not text stuck in a chat.
