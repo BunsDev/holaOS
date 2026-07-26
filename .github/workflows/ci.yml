@@ -337,7 +337,8 @@ jobs:
         run: bash runtime/deploy/package_macos_runtime.sh out/runtime-macos
 
       - name: Upload runtime Sentry source maps
-        if: ${{ env.SENTRY_AUTH_TOKEN != '' }}
+        if: ${{ env.SENTRY_AUTH_TOKEN != '' && vars.SENTRY_ORG != '' }}
+        continue-on-error: true
         env:
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
           SENTRY_ORG: ${{ vars.SENTRY_ORG }}
@@ -448,7 +449,8 @@ jobs:
           npm run build
 
       - name: Upload desktop Sentry source maps
-        if: ${{ env.SENTRY_AUTH_TOKEN != '' }}
+        if: ${{ env.SENTRY_AUTH_TOKEN != '' && vars.SENTRY_ORG != '' }}
+        continue-on-error: true
         working-directory: apps/desktop
         env:
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
@@ -1070,7 +1072,8 @@ jobs:
           Add-Content -Path $env:GITHUB_OUTPUT -Value "installer_path=$stablePath"
 
       - name: Upload desktop Sentry source maps
-        if: ${{ env.SENTRY_AUTH_TOKEN != '' }}
+        if: ${{ env.SENTRY_AUTH_TOKEN != '' && vars.SENTRY_ORG != '' }}
+        continue-on-error: true
         working-directory: apps/desktop
         shell: bash
         env:
