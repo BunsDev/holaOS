@@ -1966,7 +1966,7 @@ function isReleaseStyleAppVersion(version: string) {
 
 function currentDesktopReleaseTag() {
   const version = currentAppVersion();
-  return version ? `Holaboss-${version}` : "";
+  return version ? `holaOS-${version}` : "";
 }
 
 function appUpdateSupported() {

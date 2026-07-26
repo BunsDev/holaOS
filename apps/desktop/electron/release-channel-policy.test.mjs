@@ -117,8 +117,8 @@ test("manual CI workflow publishes desktop installers without standalone runtime
   assert.match(source, /default: latest/);
   assert.match(source, /type: choice/);
   assert.match(source, /options:\n\s+- latest\n\s+- beta/);
-  assert.match(source, /release_tag must match Holaboss-YYYY\.MDD\.R/);
-  assert.match(source, /release_version="\$\{release_tag#Holaboss-\}"/);
+  assert.match(source, /release_tag must match holaOS-YYYY\.MDD\.R/);
+  assert.match(source, /release_version="\$\{release_tag#holaOS-\}"/);
   assert.match(source, /release_title="holaOS \$\{release_version\}"/);
   assert.match(source, /release_channel="\$\{\{ inputs\.release_channel \}\}"/);
   assert.match(source, /beta channel releases must be marked as prerelease/);

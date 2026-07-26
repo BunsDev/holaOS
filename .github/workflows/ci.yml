@@ -225,12 +225,12 @@ jobs:
         id: release_meta
         run: |
           release_tag="${{ inputs.release_tag }}"
-          if ! printf '%s' "${release_tag}" | grep -Eq '^[Hh]olaboss-[0-9]+\.[0-9]+\.[0-9]+$'; then
-            echo "release_tag must match [Hh]olaboss-YYYY.MDD.R; got ${release_tag}" >&2
+          if ! printf '%s' "${release_tag}" | grep -Eq '^holaOS-[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "release_tag must match holaOS-YYYY.MDD.R; got ${release_tag}" >&2
             exit 1
           fi
 
-          release_version="${release_tag#[Hh]olaboss-}"
+          release_version="${release_tag#holaOS-}"
           release_title="${{ inputs.release_title }}"
           release_channel="${{ inputs.release_channel }}"
           if [ -z "${release_title}" ]; then
