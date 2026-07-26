@@ -24,6 +24,9 @@ export interface CustomHolaApp {
 	mcp?: McpAttachInput;
 	/** The raw JSON the user pasted, kept so the create form can pre-fill on edit. */
 	mcpConfigJson?: string;
+	/** True while a headerless-MCP app is mid-sign-in (a DRAFT): committed apps drop it, and
+	 *  a draft left by a session killed mid-add is purged on next startup. */
+	pending?: boolean;
 }
 
 const KEY = "holaboss.holaapps.custom.v1";
@@ -97,6 +100,7 @@ function normalizeStored(value: unknown): CustomHolaApp | null {
 		...(typeof value.mcpConfigJson === "string"
 			? { mcpConfigJson: value.mcpConfigJson }
 			: {}),
+		...(value.pending === true ? { pending: true } : {}),
 	};
 }
 
@@ -145,6 +149,22 @@ export function deleteCustomHolaApp(holaAppId: string): void {
 	writeCustomHolaApps(
 		readCustomHolaApps().filter((a) => a.holaAppId !== holaAppId),
 	);
+}
+
+// One-time (per app session) cleanup of orphaned DRAFT apps: a headerless-MCP app saved
+// mid-sign-in (`pending`) that a killed session never committed or discarded. Runs once, so
+// it only sweeps drafts from a PREVIOUS session — never the one being added right now.
+let orphanDraftsPurged = false;
+export function purgeOrphanedDraftApps(): void {
+	if (orphanDraftsPurged) {
+		return;
+	}
+	orphanDraftsPurged = true;
+	const all = readCustomHolaApps();
+	const kept = all.filter((app) => !app.pending);
+	if (kept.length !== all.length) {
+		writeCustomHolaApps(kept);
+	}
 }
 
 /** Custom apps as WebHolaApps (installed + ready) so they merge into the catalog and
@@ -226,6 +246,44 @@ function remoteUrlFromCommand(server: Record<string, unknown>): string | null {
 	return found ? found.trim() : null;
 }
 
+// Prepend https:// when a URL is entered without a scheme (mcp.example.com → https://…).
+export function normalizeRemoteUrl(raw: string): string {
+	const value = raw.trim();
+	if (!value) {
+		return value;
+	}
+	return /^https?:\/\//i.test(value) ? value : `https://${value}`;
+}
+
+// A single pasted token that is (or becomes, once https:// is prepended) a remote URL — so a
+// provider that hands you only a URL, with or without the scheme, can be pasted as-is. A
+// scheme-less token must have a dotted host so a stray word isn't misread as a URL.
+function bareUrlOrNull(raw: string): string | null {
+	const value = raw.trim();
+	if (
+		!value ||
+		/\s/.test(value) ||
+		value.startsWith("{") ||
+		value.startsWith("[")
+	) {
+		return null;
+	}
+	const hasScheme = /^https?:\/\//i.test(value);
+	const candidate = hasScheme ? value : `https://${value}`;
+	try {
+		const parsed = new URL(candidate);
+		if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+			return null;
+		}
+		if (hasScheme || parsed.hostname.includes(".")) {
+			return candidate;
+		}
+	} catch {
+		// not a URL — fall through to JSON parsing
+	}
+	return null;
+}
+
 /** Parse a pasted MCP config (mcpServers-style JSON, a `servers` map, or a bare
  * single-server object) into a resolved app-owned `McpAttachInput`. v1 supports
  * REMOTE (URL) servers with optional `headers`/`tools`; a command/stdio-only server
@@ -237,6 +295,24 @@ export function parseCustomMcpConfig(
 	const trimmed = json.trim();
 	if (!trimmed) {
 		return { error: "Paste an MCP server config." };
+	}
+	// Many providers give ONLY a remote MCP URL (e.g. https://mcp.heygen.com/mcp/v1/) for an
+	// "add custom connector" flow — accept a bare URL as shorthand for { url }. No headers ⇒
+	// treated as OAuth, so sign-in opens on add (same as a headerless JSON config).
+	const bare = bareUrlOrNull(trimmed);
+	if (bare) {
+		return {
+			attach: {
+				id: ownerAppId,
+				mcpUrl: bare,
+				holabossHosted: false,
+				headerKeys: {},
+				queryKeys: {},
+				envKeys: {},
+				tools: [],
+				ownerAppId,
+			},
+		};
 	}
 	const parsed = safeJsonParse(trimmed);
 	if (parsed === undefined) {
@@ -250,7 +326,9 @@ export function parseCustomMcpConfig(
 		return { error: "No MCP server found in the config." };
 	}
 	const directUrl = typeof server.url === "string" ? server.url.trim() : "";
-	const url = directUrl || remoteUrlFromCommand(server) || "";
+	const url = normalizeRemoteUrl(
+		directUrl || remoteUrlFromCommand(server) || "",
+	);
 	if (!url) {
 		if (server.command !== undefined) {
 			return {
