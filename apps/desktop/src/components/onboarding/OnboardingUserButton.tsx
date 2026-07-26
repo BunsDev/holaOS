@@ -49,7 +49,7 @@ export function OnboardingUserButton() {
           <DropdownMenuItem
             onClick={() =>
               void window.electronAPI.ui.openExternalUrl(
-                "https://www.holaos.ai/docs",
+                "https://github.com/holaboss-ai/holaOS",
               )
             }
           >
