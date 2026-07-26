@@ -7,7 +7,6 @@ import {
   ArrowLeft,
   CalendarClock,
   Check,
-  CheckCircle2,
   Bot,
   ChevronDown,
   Clock3,
@@ -102,7 +101,6 @@ interface AutomationsPaneProps {
 }
 
 interface RefreshDataOptions {
-  preserveStatusMessage?: boolean;
   suppressErrors?: boolean;
 }
 
@@ -315,10 +313,6 @@ export function AutomationsPane({
   );
   const [isLoading, setIsLoading] = useState(false);
   const [busyJobId, setBusyJobId] = useState<string | null>(null);
-  const [statusMessage, setStatusMessage] = useState("");
-  const [statusTone, setStatusTone] = useState<"info" | "success" | "error">(
-    "info",
-  );
 
   const { projects } = useWorkspaceProjects(activeWorkspaceId || null);
   const projectNameById = useMemo(() => {
@@ -420,28 +414,8 @@ export function AutomationsPane({
     ? (cronjobs.find((job) => job.id === editJobId) ?? null)
     : null;
 
-  const statusBarClassName =
-    statusTone === "success"
-      ? "border-b border-success/20 bg-success/8 text-success"
-      : statusTone === "error"
-        ? "border-b border-destructive/20 bg-destructive/5 text-destructive"
-        : "border-b border-border bg-fg-2 text-muted-foreground";
-
-  // Auto-dismiss success messages after a moment so the banner doesn't
-  // linger forever after a save. Errors stay until the user replaces them
-  // (or another action overwrites) — they need acknowledgement. Info
-  // also persists since it's used for "open in chat" affordance hints.
-  useEffect(() => {
-    if (statusTone !== "success" || !statusMessage) return;
-    const timeoutId = window.setTimeout(() => {
-      setStatusMessage("");
-    }, 3500);
-    return () => window.clearTimeout(timeoutId);
-  }, [statusMessage, statusTone]);
-
   const refreshData = useCallback(
     async (options?: RefreshDataOptions) => {
-      const preserveStatusMessage = options?.preserveStatusMessage ?? false;
       const suppressErrors = options?.suppressErrors ?? false;
 
       if (!activeWorkspaceId) {
@@ -455,14 +429,11 @@ export function AutomationsPane({
         });
 
         setCronjobs(cronjobsResponse.jobs);
-
-        if (!preserveStatusMessage) {
-          setStatusMessage("");
-        }
       } catch (error) {
         if (!suppressErrors) {
-          setStatusTone("error");
-          setStatusMessage(normalizeErrorMessage(error));
+          toast.error("Couldn't load automations", {
+            description: normalizeErrorMessage(error),
+          });
         }
       } finally {
         setIsLoading(false);
@@ -477,7 +448,6 @@ export function AutomationsPane({
 
   const handleDelete = async (job: CronjobRecordPayload) => {
     setBusyJobId(job.id);
-    setStatusMessage("");
     try {
       await remoteApi.cronjobs.delete({
         jobId: job.id,
@@ -488,15 +458,12 @@ export function AutomationsPane({
           ? { mode: "index" }
           : current,
       );
-      setStatusTone("success");
-      setStatusMessage(`Deleted "${jobTitle(job)}".`);
-      void refreshData({
-        preserveStatusMessage: true,
-        suppressErrors: true,
-      });
+      toast.success(`Deleted "${jobTitle(job)}"`);
+      void refreshData({ suppressErrors: true });
     } catch (error) {
-      setStatusTone("error");
-      setStatusMessage(normalizeErrorMessage(error));
+      toast.error("Couldn't delete automation", {
+        description: normalizeErrorMessage(error),
+      });
     } finally {
       setBusyJobId(null);
     }
@@ -509,7 +476,6 @@ export function AutomationsPane({
       successMessage: string,
     ) => {
       setBusyJobId(job.id);
-      setStatusMessage("");
       try {
         const updated = await remoteApi.cronjobs.update({
           jobId: job.id,
@@ -518,15 +484,12 @@ export function AutomationsPane({
         setCronjobs((previous) =>
           previous.map((item) => (item.id === updated.id ? updated : item)),
         );
-        setStatusTone("success");
-        setStatusMessage(successMessage);
-        void refreshData({
-          preserveStatusMessage: true,
-          suppressErrors: true,
-        });
+        toast.success(successMessage);
+        void refreshData({ suppressErrors: true });
       } catch (error) {
-        setStatusTone("error");
-        setStatusMessage(normalizeErrorMessage(error));
+        toast.error("Couldn't save automation", {
+          description: normalizeErrorMessage(error),
+        });
         // Re-throw so the edit dialog can keep itself open and let the user
         // retry without losing their draft.
         throw error;
@@ -539,7 +502,6 @@ export function AutomationsPane({
 
   const handleToggleEnabled = async (job: CronjobRecordPayload) => {
     setBusyJobId(job.id);
-    setStatusMessage("");
     try {
       const updated = await remoteApi.cronjobs.update({
         jobId: job.id,
@@ -548,17 +510,14 @@ export function AutomationsPane({
       setCronjobs((previous) =>
         previous.map((item) => (item.id === updated.id ? updated : item)),
       );
-      setStatusTone("success");
-      setStatusMessage(
-        `${updated.enabled ? "Enabled" : "Paused"} "${jobTitle(updated)}".`,
+      toast.success(
+        `${updated.enabled ? "Enabled" : "Paused"} "${jobTitle(updated)}"`,
       );
-      void refreshData({
-        preserveStatusMessage: true,
-        suppressErrors: true,
-      });
+      void refreshData({ suppressErrors: true });
     } catch (error) {
-      setStatusTone("error");
-      setStatusMessage(normalizeErrorMessage(error));
+      toast.error("Couldn't update automation", {
+        description: normalizeErrorMessage(error),
+      });
     } finally {
       setBusyJobId(null);
     }
@@ -566,7 +525,6 @@ export function AutomationsPane({
 
   const handleRunNow = async (job: CronjobRecordPayload) => {
     setBusyJobId(job.id);
-    setStatusMessage("");
     try {
       const response = await remoteApi.cronjobs.runNow({
         jobId: job.id,
@@ -577,7 +535,6 @@ export function AutomationsPane({
           item.id === response.cronjob.id ? response.cronjob : item,
         ),
       );
-      // Run-now feedback lives in the toast alone — no status banner.
       toast.success(`Running "${jobTitle(response.cronjob)}" now`, {
         description: "Track it from the running task in chat.",
       });
@@ -589,10 +546,7 @@ export function AutomationsPane({
         onRunNow(response.cronjob);
         return;
       }
-      void refreshData({
-        preserveStatusMessage: true,
-        suppressErrors: true,
-      });
+      void refreshData({ suppressErrors: true });
     } catch (error) {
       toast.error("Couldn't run automation", {
         description: normalizeErrorMessage(error),
@@ -652,9 +606,8 @@ export function AutomationsPane({
           ...(draft.model ? { selected_model: draft.model } : {}),
         },
       });
-      setStatusTone("success");
-      setStatusMessage(`Created "${draft.name || "automation"}".`);
-      await refreshData({ preserveStatusMessage: true, suppressErrors: true });
+      toast.success(`Created "${draft.name || "automation"}"`);
+      await refreshData({ suppressErrors: true });
     },
     [activeWorkspaceId, refreshData],
   );
@@ -681,7 +634,7 @@ export function AutomationsPane({
           cron: draft.cron,
           metadata,
         },
-        `Updated "${draft.name || jobTitle(job)}".`,
+        `Updated "${draft.name || jobTitle(job)}"`,
       );
     },
     [handleUpdateCronjobField],
@@ -853,23 +806,6 @@ export function AutomationsPane({
           setPendingDelete(null);
         }}
       />
-
-      {statusMessage ? (
-        <div
-          key={`${statusTone}:${statusMessage}`}
-          className={cn(
-            "mx-auto flex w-full max-w-5xl shrink-0 items-center gap-1.5 px-6 py-1.5 text-xs font-medium duration-snappy ease-out-expo animate-in fade-in-0",
-            statusBarClassName,
-          )}
-        >
-          {statusTone === "success" ? (
-            <CheckCircle2 className="size-3.5 shrink-0" />
-          ) : statusTone === "error" ? (
-            <AlertTriangle className="size-3.5 shrink-0" />
-          ) : null}
-          <span className="min-w-0 truncate">{statusMessage}</span>
-        </div>
-      ) : null}
 
       <div className="min-h-0 w-full flex-1 overflow-y-auto [&>*]:mx-auto [&>*]:w-full [&>*]:max-w-5xl">
         {!activeWorkspaceId ? (

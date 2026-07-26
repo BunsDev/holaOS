@@ -33,12 +33,34 @@ test("run-now can jump directly into the spawned scheduled session", async () =>
   );
 });
 
-test("post-action refresh preserves the current banner and suppresses transient refresh errors", async () => {
+test("every outcome is a toast — no in-page status banner survives", async () => {
   const source = await readFile(sourcePath, "utf8");
 
-  assert.match(source, /interface RefreshDataOptions \{\s*preserveStatusMessage\?: boolean;\s*suppressErrors\?: boolean;\s*\}/);
-  assert.match(source, /if \(!preserveStatusMessage\) \{\s*setStatusMessage\(""\);\s*\}/);
-  assert.match(source, /void refreshData\(\{\s*preserveStatusMessage: true,\s*suppressErrors: true,\s*\}\);/);
+  // The banner and its tone plumbing are gone; sonner is the only channel.
+  assert.doesNotMatch(source, /statusMessage|statusTone|statusBarClassName/);
+  for (const call of [
+    /toast\.success\(`Deleted "\$\{jobTitle\(job\)\}"`\)/,
+    /toast\.success\(`Created "\$\{draft\.name \|\| "automation"\}"`\)/,
+    /toast\.error\("Couldn't load automations", \{/,
+    /toast\.error\("Couldn't delete automation", \{/,
+    /toast\.error\("Couldn't save automation", \{/,
+    /toast\.error\("Couldn't update automation", \{/,
+  ]) {
+    assert.match(source, call);
+  }
+});
+
+test("a post-action refresh still swallows its own transient errors", async () => {
+  const source = await readFile(sourcePath, "utf8");
+
+  // Background refreshes fire after an action that already reported its own
+  // outcome — a failure there must not stack a second toast on top of it.
+  assert.match(source, /interface RefreshDataOptions \{\s*suppressErrors\?: boolean;\s*\}/);
+  assert.match(source, /void refreshData\(\{ suppressErrors: true \}\);/);
+  assert.match(
+    source,
+    /if \(!suppressErrors\) \{\s*toast\.error\("Couldn't load automations", \{/,
+  );
 });
 
 test("empty state keeps the decorated icon and offers both creation paths as peer links", async () => {
