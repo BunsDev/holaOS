@@ -127,7 +127,6 @@ Install apps from the in-workspace marketplace and they open as **real, interact
 - [What makes it different](#-what-makes-it-different)
 - [Run it your way](#-run-it-your-way)
 - [Quick Start](#quick-start)
-- [Documentation](#documentation)
 - [Manual Install](#manual-install)
 - [Contributing](#contributing)
 - [OSS Release Notes](#oss-release-notes)
@@ -151,28 +150,6 @@ You can also follow the manual path if you want to control each setup step.
 </p>
 
 <p align="center"><strong>If holaOS is useful or interesting, a GitHub Star would be greatly appreciated.</strong></p>
-
-## Documentation
-
-All deeper technical and product documentation lives at **[holaos.ai/docs](https://www.holaos.ai/docs)**:
-
-| Section | What's Covered |
-| --- | --- |
-| [Overview](https://www.holaos.ai/docs/getting-started) | The merged entry page for the environment-engineering thesis and system model |
-| [Quick Start](https://www.holaos.ai/docs/getting-started/quick-start) | The fastest path to a working local desktop environment |
-| [Workspaces](https://www.holaos.ai/docs/getting-started/workspaces) | How workspaces are created, switched, managed, and represented on disk |
-| [Environment Engineering](https://www.holaos.ai/docs/concepts/environment-engineering) | The core thesis behind holaOS and why the environment defines the system |
-| [Concepts](https://www.holaos.ai/docs/concepts/concepts) | Core system vocabulary for workspaces, runtime, memory, and outputs |
-| [Workspace Model](https://www.holaos.ai/docs/concepts/workspace-model) | Workspace contract, authored surfaces, and runtime-owned state |
-| [Memory and Continuity](https://www.holaos.ai/docs/concepts/memory-and-continuity) | Durable memory, continuity artifacts, and long-horizon resume behavior |
-| [Agent Harness](https://www.holaos.ai/docs/concepts/agent-harness) | The stable harness boundary inside the runtime and how executors fit into it |
-| [Independent Deploy](https://www.holaos.ai/docs/contribute/runtime/independent-deploy) | Running the portable runtime without the desktop app |
-| [Build on holaOS](https://www.holaos.ai/docs/contribute) | The code-true developer map for desktop, runtime, apps, templates, and validation paths |
-| [Start Developing](https://www.holaos.ai/docs/contribute/start-developing) | The local developer path for desktop and runtime validation |
-| [Runtime APIs](https://www.holaos.ai/docs/contribute/runtime/apis) | The runtime operational surface for workspaces, runs, streaming, and app lifecycle |
-| [Build Your First App](https://www.holaos.ai/docs/build/apps/first-app) | Building workspace apps on top of holaOS |
-| [Reference](https://www.holaos.ai/docs/reference/environment-variables) | Environment variables and supporting reference material |
-
 
 ## Manual Install
 
@@ -249,9 +226,6 @@ Use the local path when you are actively changing runtime code. Use the publishe
 
 Use `One-Line Install` when you want the fastest path to a working local desktop environment. Use `Manual Install` when you need to inspect or control each setup step yourself.
 
-## Contributing
-
-If you want to contribute, start with [Start Developing](https://www.holaos.ai/docs/contribute/start-developing) to get the local desktop and runtime loop working, then use [Contributing](https://www.holaos.ai/docs/contribute/start-developing/contributing) for validation, commit, and review expectations.
 
 ## OSS Release Notes
 
