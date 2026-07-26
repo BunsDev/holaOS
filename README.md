@@ -7,7 +7,7 @@
 <p align="center">
   <a href="https://github.com/holaboss-ai/holaOS/actions/workflows/ci.yml"><img src="https://github.com/holaboss-ai/holaOS/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
   <img src="https://img.shields.io/badge/node-24.14.1-43853d" alt="Node 24.14.1" />
-  <img src="https://img.shields.io/badge/platform-macOS%20supported,%20Windows%20%26%20Linux%20in%20progress-f28c28" alt="macOS supported, Windows and Linux in progress" />
+  <img src="https://img.shields.io/badge/platform-macOS%20%28Apple%20Silicon%20%2B%20Intel%29%2C%20Windows%2C%20Linux-43853d" alt="macOS (Apple Silicon and Intel), Windows, and Linux supported" />
   <img src="https://img.shields.io/badge/desktop-Electron-47848f" alt="Electron desktop" />
   <img src="https://img.shields.io/badge/runtime-TypeScript-3178c6" alt="TypeScript runtime" />
   <img src="https://img.shields.io/badge/license-Modified%20Apache%202.0-0f7ae5" alt="Modified Apache 2.0 license" />
