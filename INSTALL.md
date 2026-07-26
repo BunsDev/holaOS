@@ -87,7 +87,7 @@ If `node --version` reports a major version lower than `24`, stop and upgrade No
 If the repository is not already present locally, clone it:
 
 ```bash
-git clone https://github.com/holaboss-ai/holaOS.git
+git clone https://github.com/holaboss-ai/holaOS.git holaboss-ai
 cd holaboss-ai
 ```
 
@@ -201,7 +201,7 @@ curl -fsSL https://raw.githubusercontent.com/holaboss-ai/holaOS/main/scripts/ins
 For the equivalent manual fresh setup, the expected command sequence is:
 
 ```bash
-git clone https://github.com/holaboss-ai/holaOS.git
+git clone https://github.com/holaboss-ai/holaOS.git holaboss-ai
 cd holaboss-ai
 npm run desktop:install
 cp apps/desktop/.env.example apps/desktop/.env
