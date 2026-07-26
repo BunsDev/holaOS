@@ -981,42 +981,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-const HOLAHUB_MAX_IMAGE_BYTES = 4 * 1024 * 1024;
-
-function holahubImageContentType(filePath: string): string | null {
-  switch (path.extname(filePath).toLowerCase()) {
-    case ".png":
-      return "image/png";
-    case ".jpg":
-    case ".jpeg":
-      return "image/jpeg";
-    case ".webp":
-      return "image/webp";
-    case ".gif":
-      return "image/gif";
-    default:
-      return null;
-  }
-}
-
-// The HolaHub MCP server (url + Authorization bearer) the desktop writes into
-// workspace.yaml. Its upload endpoint is the /images sibling of the /sse MCP url.
-function holahubUploadTarget(workspaceDir: string): {
-  uploadUrl: string;
-  authorization: string;
-} {
-  const document = readWorkspaceYamlDocument(workspaceDir);
-  const registry = isRecord(document.mcp_registry) ? document.mcp_registry : {};
-  const appServers = isRecord(registry.app_servers) ? registry.app_servers : {};
-  const holahub = isRecord(appServers.holahub) ? appServers.holahub : {};
-  const url = typeof holahub.url === "string" ? holahub.url : "";
-  const headers = isRecord(holahub.headers) ? holahub.headers : {};
-  const authorization =
-    typeof headers.Authorization === "string" ? headers.Authorization : "";
-  const uploadUrl = url ? url.replace(/\/sse(\?.*)?$/, "/images") : "";
-  return { uploadUrl, authorization };
-}
-
 const uiApp = express();
 uiApp.get("/", (_req, res) => {
   res.status(200).type("html").send(\`<!doctype html>
@@ -1220,6 +1184,42 @@ function shutdown(signal: string) {
 process.on("SIGINT", () => shutdown("SIGINT"));
 process.on("SIGTERM", () => shutdown("SIGTERM"));
 `;
+}
+
+const HOLAHUB_MAX_IMAGE_BYTES = 4 * 1024 * 1024;
+
+function holahubImageContentType(filePath: string): string | null {
+  switch (path.extname(filePath).toLowerCase()) {
+    case ".png":
+      return "image/png";
+    case ".jpg":
+    case ".jpeg":
+      return "image/jpeg";
+    case ".webp":
+      return "image/webp";
+    case ".gif":
+      return "image/gif";
+    default:
+      return null;
+  }
+}
+
+// The HolaHub MCP server (url + Authorization bearer) the desktop writes into
+// workspace.yaml. Its upload endpoint is the /images sibling of the /sse MCP url.
+function holahubUploadTarget(workspaceDir: string): {
+  uploadUrl: string;
+  authorization: string;
+} {
+  const document = readWorkspaceYamlDocument(workspaceDir);
+  const registry = isRecord(document.mcp_registry) ? document.mcp_registry : {};
+  const appServers = isRecord(registry.app_servers) ? registry.app_servers : {};
+  const holahub = isRecord(appServers.holahub) ? appServers.holahub : {};
+  const url = typeof holahub.url === "string" ? holahub.url : "";
+  const headers = isRecord(holahub.headers) ? holahub.headers : {};
+  const authorization =
+    typeof headers.Authorization === "string" ? headers.Authorization : "";
+  const uploadUrl = url ? url.replace(/\/sse(\?.*)?$/, "/images") : "";
+  return { uploadUrl, authorization };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

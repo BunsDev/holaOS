@@ -5955,11 +5955,14 @@ export function buildRuntimeApiServer(options: BuildRuntimeApiServerOptions = {}
         headers: request.headers as Record<string, unknown>,
         body: request.body,
       });
-      const query = requiredString(request.body.query, "query").trim();
+      const query = (optionalString(request.body.query) ?? "").trim();
       const toolkitSlug =
         typeof request.body.toolkit_slug === "string"
           ? request.body.toolkit_slug.trim().toLowerCase()
           : "";
+      if (!query && !toolkitSlug) {
+        return sendError(reply, 400, "query or toolkit_slug is required");
+      }
       // Scope results to the user's connected+active toolkits so every
       // returned tool is actually executable via composio_execute_tool.
       const active = await resolveActiveToolkitConnectionsRemoteFirst({
@@ -5974,6 +5977,33 @@ export function buildRuntimeApiServer(options: BuildRuntimeApiServerOptions = {}
       const activeSlugs = new Set(active.map((t) => t.toolkit_slug));
       if (activeSlugs.size === 0) {
         return { workspace_id: workspaceId, tools: [] };
+      }
+      // No query ⇒ enumerate one toolkit's whole catalog. The agent's preloaded
+      // set is a capped subset, so "what can you do with X" has to be
+      // answerable from the source rather than from what's in context. Compact
+      // entries only (no input schemas) — a big toolkit would otherwise dump
+      // tens of KB; a follow-up query search returns the schema.
+      if (!query) {
+        if (!activeSlugs.has(toolkitSlug)) {
+          return sendError(
+            reply,
+            400,
+            `No active connection for toolkit '${toolkitSlug}'. Connect ${toolkitSlug} first.`,
+          );
+        }
+        const catalog = await composioService.listToolkitTools(toolkitSlug);
+        return {
+          workspace_id: workspaceId,
+          toolkit_slug: toolkitSlug,
+          tool_count: catalog.length,
+          tools: catalog.map((tool) => ({
+            toolkit_slug: toolkitSlug,
+            tool_slug: tool.slug,
+            name: tool.name,
+            description: tool.description,
+          })),
+          connected_toolkits: [...activeSlugs],
+        };
       }
       const results = await composioService.searchTools(
         query,

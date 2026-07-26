@@ -9,6 +9,8 @@ const COMPOSIO_INLINE_LIST_PATH = "/api/v1/capabilities/composio-inline-tools";
 const COMPOSIO_INLINE_EXECUTE_PATH = "/api/v1/capabilities/composio-execute";
 const COMPOSIO_SEARCH_PATH = "/api/v1/capabilities/composio-search";
 const LIST_TIMEOUT_MS = 5_000;
+// Catalog listing goes upstream to Composio on a cold cache — several seconds.
+const SEARCH_TIMEOUT_MS = 20_000;
 const EXECUTE_TIMEOUT_MS = 60_000;
 
 interface InlineToolSummary {
@@ -181,24 +183,23 @@ function buildComposioMetaTools(ctx: {
     name: "composio_search_tools",
     label: "composio_search_tools",
     description:
-      'Search your connected integrations for a tool by capability (e.g. "create a calendar event") when the action you need is not among your preloaded tools. Returns matching tools with their tool_slug and input schema; run one with composio_execute_tool.',
+      'Your preloaded integration tools are a capped common subset — every connected integration exposes more tools than the ones you can see. Use this before saying an action is impossible, and before describing what an integration can do. With `query`: search by capability (e.g. "create a calendar event") and get matching tools with their tool_slug and input schema. With only `toolkit_slug` and no query: list that integration\'s FULL tool catalog (names + slugs, no schemas — search by name to get one). Run any result with composio_execute_tool.',
     promptSnippet:
-      "composio_search_tools: find a connected-integration tool by capability",
+      "composio_search_tools: your preloaded integration tools are a subset — search or list a toolkit's full catalog here",
     parameters: {
       type: "object",
       properties: {
         query: {
           type: "string",
           description:
-            "Natural-language capability to search for, e.g. 'send an email' or 'create issue'.",
+            "Natural-language capability to search for, e.g. 'send an email' or 'create issue'. Omit to list a toolkit's full catalog (toolkit_slug then required).",
         },
         toolkit_slug: {
           type: "string",
           description:
-            "Optional: restrict to one integration by slug (e.g. 'gmail', 'github').",
+            "Restrict to one integration by slug (e.g. 'gmail', 'github'). Required when query is omitted.",
         },
       },
-      required: ["query"],
     },
     execute: async (_callId, toolParams, signal) => {
       const params = (toolParams ?? {}) as Record<string, unknown>;
@@ -210,16 +211,20 @@ function buildComposioMetaTools(ctx: {
         method: "POST",
         headers: { ...ctx.headers, "content-type": "application/json" },
         body: JSON.stringify({ query, toolkit_slug: toolkitSlug }),
-        signal: combineSignals(signal, AbortSignal.timeout(LIST_TIMEOUT_MS)),
+        signal: combineSignals(signal, AbortSignal.timeout(SEARCH_TIMEOUT_MS)),
         fetchImpl: ctx.fetchImpl,
       });
       const payload = (response.payload ?? {}) as {
         tools?: unknown;
         connected_toolkits?: unknown;
+        tool_count?: unknown;
       };
       const text = serializeComposioPayload({
         tools: payload.tools ?? [],
         connected_toolkits: payload.connected_toolkits ?? [],
+        ...(typeof payload.tool_count === "number"
+          ? { tool_count: payload.tool_count }
+          : {}),
       });
       return {
         content: [{ type: "text" as const, text }],

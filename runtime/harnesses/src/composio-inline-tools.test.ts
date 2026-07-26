@@ -46,8 +46,12 @@ test("resolveComposioInlineTools fetches the list endpoint and builds executable
     selectedModel: "openai/gpt-5",
     fetchImpl,
   });
-  assert.equal(tools.length, 1);
+  assert.equal(tools.length, 3);
   assert.equal(tools[0]!.name, "notion_fetch_data");
+  assert.deepEqual(tools.slice(1).map((tool) => tool.name), [
+    "composio_search_tools",
+    "composio_execute_tool",
+  ]);
   assert.deepEqual(unavailable, [{ toolkit_slug: "slack", reason: "schema fetch failed" }]);
 
   const execResult = await tools[0]!.execute("call_1", { query: "hi" }, undefined);
@@ -123,4 +127,56 @@ test("resolveComposioInlineTools surfaces composio_error markers when execute re
   assert.equal(result.details.ok, false);
   assert.equal(result.details.error_marker, "[composio_error:forbidden:gmail] missing scope");
   assert.equal(result.details.error?.code, "forbidden");
+});
+
+test("composio_search_tools lists a toolkit's full catalog when no query is given", async () => {
+  const posts: Array<{ url: string; body: Record<string, unknown> }> = [];
+  const fetchImpl: typeof fetch = async (input, init) => {
+    const url = typeof input === "string" ? input : (input as URL | Request).toString();
+    if (url.includes("/composio-inline-tools")) {
+      return new Response(
+        JSON.stringify({
+          workspace_id: "ws1",
+          tools: [
+            {
+              name: "pinecone_list_indexes",
+              description: "List indexes",
+              toolkit_slug: "pinecone",
+              tool_slug: "PINECONE_LIST_INDEXES",
+              connected_account_id: "ca_pc",
+              input_schema: { type: "object", properties: {} },
+            },
+          ],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }
+    posts.push({ url, body: JSON.parse(init?.body as string) });
+    return new Response(
+      JSON.stringify({
+        workspace_id: "ws1",
+        toolkit_slug: "pinecone",
+        tool_count: 48,
+        tools: [
+          { toolkit_slug: "pinecone", tool_slug: "PINECONE_UPLOAD_FILE", name: "Upload File", description: "" },
+        ],
+        connected_toolkits: ["pinecone"],
+      }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    );
+  };
+  const { tools } = await resolveComposioInlineTools({
+    runtimeApiBaseUrl: "http://127.0.0.1:1",
+    workspaceId: "ws1",
+    sessionId: "s1",
+    inputId: "i1",
+    selectedModel: null,
+    fetchImpl,
+  });
+  const search = tools.find((tool) => tool.name === "composio_search_tools")!;
+  const result = await search.execute("call_1", { toolkit_slug: "pinecone" }, undefined);
+  assert.equal(posts[0]!.body.query, "");
+  assert.equal(posts[0]!.body.toolkit_slug, "pinecone");
+  const payload = JSON.parse(result.content[0]!.text) as { tool_count?: number };
+  assert.equal(payload.tool_count, 48);
 });
