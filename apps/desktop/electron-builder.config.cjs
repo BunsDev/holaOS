@@ -194,7 +194,7 @@ module.exports = {
   asar: true,
   protocols: [
     {
-      name: "holaOS Auth Callback",
+      name: "Holaboss Auth Callback",
       schemes: [
         "ai.holaboss.app"
       ]

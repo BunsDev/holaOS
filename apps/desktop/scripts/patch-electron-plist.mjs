@@ -66,7 +66,7 @@ if (!urlSchemeAlreadyPatched) {
   run("Add :CFBundleURLTypes:0:CFBundleURLSchemes array");
   run(`Add :CFBundleURLTypes:0:CFBundleURLSchemes:0 string ${SCHEME}`);
 }
-run(`Set :CFBundleURLTypes:0:CFBundleURLName 'holaOS Auth Callback'`);
+run(`Set :CFBundleURLTypes:0:CFBundleURLName 'Holaboss Auth Callback'`);
 
 // Re-register with LaunchServices
 const electronApp = path.resolve(__dirname, "../node_modules/electron/dist/Electron.app");

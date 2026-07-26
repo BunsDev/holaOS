@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/images/banner.png" alt="Holaboss logo" />
+  <img src="docs/images/banner.png" alt="holaOS logo" />
 </p>
 
 <p align="center"><strong>Your super agent for work: local- first, learn your working context in mins and never forget it</strong></p>
@@ -27,7 +27,7 @@
   <a href="#quick-start">Quick Start</a>
 </p>
 
-# HolaOS (What is HolaOS):
+# holaOS (What is holaOS):
 
 <p align="center">
   <img src="docs/images/desktop-workspace.png" alt="holaOS desktop workspace screenshot" width="1280" />
@@ -36,7 +36,7 @@
   <em>Inside the workspace: apps, files, a completely customizable dashboard, and agent chat live side by side while a single user-facing agent manager coordinates sub agents in the background.</em>
 </p> -->
 
-HolaOS is your super agent for work: local-first, learn your working context in mins and never forget it, below are the key features:
+holaOS is your super agent for work: local-first, learn your working context in mins and never forget it, below are the key features:
 
 -  **With 100+ Integration and Auto-fetch**, Agent know your state of work in mins 
     
@@ -76,11 +76,11 @@ This compression layer preserves the important working facts, relationships, and
   <img src="docs/images/mem-tree.png" alt="holaOS desktop workspace screenshot" width="1280" />
 </p>
 
-# HolaOS vs Other Agents
+# holaOS vs Other Agents
 
 A high level overview over core dimensions that impacts agent usage:
 
-|  | OpenClaw | Hermes Agent | Openhuman | HolaOS |
+|  | OpenClaw | Hermes Agent | Openhuman | holaOS |
 | --- | --- | --- | --- | --- |
 | Agent Position | ✅General Agent | ✅General Agent | ✅Personal Agent | 🔥Working Agent |
 | Simple to start | ⚠️ Terminal-first | ⚠️ Terminal-first | ⚠️ Basic UI | ✅Production Grade UI |

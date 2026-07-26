@@ -4,7 +4,7 @@ This file is a deterministic setup runbook for an agent working from a fresh mac
 
 ## Goal
 
-Bootstrap local Holaboss OSS desktop development, including provisioning `git` and Node.js `24`/`npm` when they are missing.
+Bootstrap local holaOS OSS desktop development, including provisioning `git` and Node.js `24`/`npm` when they are missing.
 
 ## Repository
 

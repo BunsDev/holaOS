@@ -6302,7 +6302,7 @@ function runtimeProviderLabel(providerId: string): string {
     normalized === "holaboss" ||
     normalized.includes("holaboss")
   ) {
-    return "holaOS Proxy";
+    return "Holaboss Proxy";
   }
   return providerId
     .split(/[-_]/)
@@ -23542,7 +23542,7 @@ function createAuthPopupHtml() {
         <div class="profileRow">
           <div id="avatar" class="avatar">H</div>
           <div class="identityWrap">
-            <div id="identityName" class="identityName">holaOS account</div>
+            <div id="identityName" class="identityName">Holaboss account</div>
             <div id="identity" class="identity">Loading session...</div>
           </div>
           <div id="badge" class="badge idle">Checking</div>
@@ -23723,7 +23723,7 @@ function createAuthPopupHtml() {
         const noticeText = state.authError || state.authMessage;
 
         els.avatar.textContent = sessionInitials(state.user);
-        els.identityName.textContent = isSignedIn ? (sessionDisplayName(state.user) || "holaOS account") : "holaOS account";
+        els.identityName.textContent = isSignedIn ? (sessionDisplayName(state.user) || "Holaboss account") : "Holaboss account";
         els.identity.textContent = isSignedIn ? (sessionEmail(state.user) || sessionUserId(state.user) || "Signed in") : "Not connected";
         els.badge.className = "badge " + badgeTone;
         els.badge.textContent = badgeLabel;

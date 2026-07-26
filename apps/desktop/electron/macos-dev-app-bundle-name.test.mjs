@@ -14,6 +14,6 @@ test("desktop macOS dev Electron bundle is rebranded to Holaboss", async () => {
   assert.match(source, /if \(!urlSchemeAlreadyPatched\) \{/);
   assert.match(
     source,
-    /run\(`Set :CFBundleURLTypes:0:CFBundleURLName 'holaOS Auth Callback'`\);/,
+    /run\(`Set :CFBundleURLTypes:0:CFBundleURLName 'Holaboss Auth Callback'`\);/,
   );
 });

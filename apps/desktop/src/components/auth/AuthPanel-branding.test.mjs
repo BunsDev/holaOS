@@ -4,7 +4,7 @@ import test from "node:test";
 
 const AUTH_PANEL_PATH = new URL("./AuthPanel.tsx", import.meta.url);
 
-test("auth panel sign-in messaging uses holaOS account branding", async () => {
+test("auth panel sign-in messaging uses holaOS sign-in branding", async () => {
   const source = await readFile(AUTH_PANEL_PATH, "utf8");
 
   assert.match(
