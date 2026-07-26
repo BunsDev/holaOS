@@ -114,12 +114,8 @@ Install apps from the in-workspace marketplace and they open as **real, interact
 
 ## Table of Contents
 
-- [Why holaOS](#why-holaos)
-- [What makes it different](#-what-makes-it-different)
-- [Run it your way](#-run-it-your-way)
 - [Quick Start](#quick-start)
 - [Manual Install](#manual-install)
-- [Contributing](#contributing)
 - [OSS Release Notes](#oss-release-notes)
 
 ## Quick Start
