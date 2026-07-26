@@ -38,16 +38,6 @@
 
 ---
 
-## Why holaOS
-
-AI agents are stuck in silos. Each one lives in its own tab, forgets what happened last session, can't see your files, and locks you into a single model. You end up shuttling context between a coding agent, a chat app, and five browser tabs — doing the glue work yourself.
-
-**holaOS flips that.** It isn't another agent — it's the _computer your agents work on_. Pick the agent you want, point it at your real tools and files, and it picks up exactly where you left off, because everything shares one memory you own.
-
-**One workspace. Any agent. Your whole workflow.**
-
----
-
 ## ✨ What makes it different
 
 ### 🔀 Run any agent, one workspace
