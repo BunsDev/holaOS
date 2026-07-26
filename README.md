@@ -78,11 +78,22 @@ Start with **high-performance models built in** (Kimi, GLM, and more) at a fract
 - **BYOK when you want it** — your keys, your providers, your rates.
 - **Right model per task** — pick per job, per agent.
 
-### 🧩 Skills, Combos & HolaApps — a workspace that grows
+### 🧩 Skills & Combos — teach it once, reuse everywhere
 
 - **Skills** — package a workflow once; any agent runs it on demand.
 - **Combos** — bundle skills and integrations into a single one-click install.
-- **HolaApps** — install apps from the in-workspace marketplace and they open as **real, interactive surfaces** with their own UI, driven by your agent — not answers trapped in a chat.
+
+### 🪟 HolaApps — apps and agent, side by side
+
+Install apps from the in-workspace marketplace and they open as **real, interactive surfaces right beside your agent.** Watch it work inside the app, step in whenever you want, and the result lands in place — not a wall of chat text, but the actual app, driven by the agent, next to the agent.
+
+- **Real surfaces, not chat** — every app is a live UI (Notion, a browser, your own app), not a transcript.
+- **Side-by-side by design** — app and agent share the screen, so you always see what's happening and can take over.
+- **One click to install** — browse the in-workspace marketplace and open any app instantly.
+
+<p align="center">
+  <img src="docs/images/desktop-workspace1.png" alt="A HolaApp open side-by-side with the agent working in the holaOS workspace" width="1280" />
+</p>
 
 ### 🛠️ Your entire workstation, agent-operable
 
