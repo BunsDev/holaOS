@@ -83,7 +83,6 @@ Start with **high-performance models built in** (Kimi, GLM, and more) at a fract
 - **Skills** — package a workflow once; any agent runs it on demand.
 - **Combos** — bundle skills and integrations into a single one-click install.
 - **HolaApps** — install apps from the in-workspace marketplace and they open as **real, interactive surfaces** with their own UI, driven by your agent — not answers trapped in a chat.
-- **HolaHub** — the community feed: discover the skills, apps, and MCP servers people actually use, and install them in a click.
 
 ### 🛠️ Your entire workstation, agent-operable
 
