@@ -108,10 +108,6 @@ Install apps from the in-workspace marketplace and they open as **real, interact
 - **💬 Reach it from anywhere you chat** — Feishu, WeChat, Slack, Telegram. Send a task from any thread; the result comes back to the same thread.
 - **⏰ Automation** — run on a schedule or a trigger. Digests, monitors, and reports finish and file themselves.
 
-<p align="center">
-  <img src="docs/images/desktop-workspace1.png" alt="The agent driving a real browser side-by-side in the holaOS workspace" width="1280" />
-</p>
-
 ---
 
 ## 🚀 Run it your way
