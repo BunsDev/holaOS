@@ -1168,7 +1168,7 @@ jobs:
       - name: Download Linux runtime release artifacts
         uses: actions/download-artifact@v8
         with:
-          name: holaboss-runtime-linux-${{ inputs.release_tag }}
+          name: holaOS-runtime-linux-${{ inputs.release_tag }}
           path: release-assets/linux-runtime
 
       - name: Download macOS desktop release artifacts
@@ -1260,9 +1260,9 @@ jobs:
           : > "${notes_path}"
 
           linux_runtime_dir="release-assets/linux-runtime"
-          linux_runtime_asset="${linux_runtime_dir}/holaboss-runtime-linux-x64.tar.gz"
-          linux_runtime_checksum_asset="${linux_runtime_dir}/holaboss-runtime-linux-x64.tar.gz.sha256"
-          linux_runtime_manifest_asset="${linux_runtime_dir}/holaboss-runtime-linux-x64.json"
+          linux_runtime_asset="${linux_runtime_dir}/holaOS-runtime-linux-x64.tar.gz"
+          linux_runtime_checksum_asset="${linux_runtime_dir}/holaOS-runtime-linux-x64.tar.gz.sha256"
+          linux_runtime_manifest_asset="${linux_runtime_dir}/holaOS-runtime-linux-x64.json"
           for linux_asset in \
             "${linux_runtime_asset}" \
             "${linux_runtime_checksum_asset}" \

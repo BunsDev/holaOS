@@ -131,7 +131,7 @@ test("manual CI workflow publishes desktop installers without standalone runtime
   assert.doesNotMatch(source, /gh release edit "\$\{RELEASE_TAG\}" \\\n\s+--title "\$\{RELEASE_TITLE\}" \\\n\s+--notes-file "\$\{notes_path\}" \\\n\s+--draft/);
   assert.match(source, /HOLABOSS_RUNTIME_DIR: \$\{\{ github\.workspace \}\}\/out\/runtime-macos/);
   assert.doesNotMatch(source, /HOLABOSS_RUNTIME_TARBALL:/);
-  assert.doesNotMatch(source, /RUNTIME_ASSET_NAME: holaboss-runtime-linux\.tar\.gz/);
+  assert.doesNotMatch(source, /RUNTIME_ASSET_NAME: holaOS-runtime-linux\.tar\.gz/);
   assert.doesNotMatch(source, /RUNTIME_ASSET_NAME: holaboss-runtime-macos\.tar\.gz/);
   assert.doesNotMatch(source, /RUNTIME_ASSET_NAME: holaboss-runtime-windows\.tar\.gz/);
   assert.doesNotMatch(source, /gh release upload "\$\{RELEASE_TAG\}"/);
