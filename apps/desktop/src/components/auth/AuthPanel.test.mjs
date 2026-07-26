@@ -314,7 +314,7 @@ test("provider templates only expose the Holaboss proxy defaults", async () => {
     providerTemplatesBlock.match(/holaboss:\s*\{[\s\S]*?apiKeyPlaceholder: "hbrt\.v1\.your-proxy-token"[\s\S]*?\n\s*}/)?.[0] ?? "";
 
   assert.match(source, /const KNOWN_PROVIDER_ORDER = \[\s*"holaboss"\s*\] as const;/);
-  assert.match(holabossTemplate, /label: "Holaboss Proxy"/);
+  assert.match(holabossTemplate, /label: "holaOS Proxy"/);
   assert.match(holabossTemplate, /defaultModels: \[\]/);
   assert.match(holabossTemplate, /defaultBackgroundModel: null/);
   assert.match(holabossTemplate, /defaultImageModel: null/);

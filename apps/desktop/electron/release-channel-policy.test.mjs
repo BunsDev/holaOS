@@ -111,7 +111,7 @@ test("manual CI workflow publishes desktop installers without standalone runtime
   assert.match(source, /HOLABOSS_RELEASES_REPO: holaboss-ai\/holaOS-releases/);
   assert.match(source, /workflow_dispatch:\n\s+inputs:\n\s+ref:/);
   assert.match(source, /release_tag:\n\s+description: GitHub release tag to create in holaOS-releases/);
-  assert.match(source, /release_title:\n\s+description: Optional GitHub release title \(defaults to Holaboss <version>\)/);
+  assert.match(source, /release_title:\n\s+description: Optional GitHub release title \(defaults to holaOS <version>\)/);
   assert.match(source, /prerelease:\n\s+description: Mark the GitHub release as a prerelease/);
   assert.match(source, /release_channel:\n\s+description: Auto-update channel to publish for desktop clients/);
   assert.match(source, /default: latest/);
@@ -119,7 +119,7 @@ test("manual CI workflow publishes desktop installers without standalone runtime
   assert.match(source, /options:\n\s+- latest\n\s+- beta/);
   assert.match(source, /release_tag must match Holaboss-YYYY\.MDD\.R/);
   assert.match(source, /release_version="\$\{release_tag#Holaboss-\}"/);
-  assert.match(source, /release_title="Holaboss \$\{release_version\}"/);
+  assert.match(source, /release_title="holaOS \$\{release_version\}"/);
   assert.match(source, /release_channel="\$\{\{ inputs\.release_channel \}\}"/);
   assert.match(source, /beta channel releases must be marked as prerelease/);
   assert.match(source, /latest channel releases must not be marked as prerelease/);
@@ -139,7 +139,7 @@ test("manual CI workflow publishes desktop installers without standalone runtime
   assert.match(source, /- name: Install workspace dependencies \(covers desktop\)\n\s+env:\n\s+ELECTRON_SKIP_BINARY_DOWNLOAD: "1"\n\s+run: bun install --frozen-lockfile/);
   assert.match(source, /Build signed macOS app bundle/);
   assert.match(source, /app-update\.yml is missing from signed app bundle/);
-  assert.match(source, /packaged_app="\$\{RUNNER_TEMP\}\/Holaboss\.app"/);
+  assert.match(source, /packaged_app="\$\{RUNNER_TEMP\}\/holaOS\.app"/);
   assert.doesNotMatch(source, /node scripts\/write-app-update-config\.mjs "\$\{prepackaged_app\}"/);
   assert.doesNotMatch(source, /app-update\.yml is missing from prepackaged macOS app bundle/);
   // dmg + zip are built as separate electron-builder calls inside the helper
@@ -154,10 +154,10 @@ test("manual CI workflow publishes desktop installers without standalone runtime
   assert.match(source, /beta-mac\.yml was not generated for stable-channel compatibility/);
   assert.match(source, /files: is missing a \.zip entry/);
   assert.match(source, /files: is missing a \.dmg entry/);
-  assert.match(source, /macOS zip does not contain Holaboss\.app as the root app bundle/);
+  assert.match(source, /macOS zip does not contain holaOS\.app as the root app bundle/);
   assert.match(source, /app-update\.yml is missing from final macOS zip/);
   assert.match(source, /extract_dir="\$\{RUNNER_TEMP\}\/mac-zip-signature-verify"/);
-  assert.match(source, /Holaboss\.app was not extracted from the final macOS zip/);
+  assert.match(source, /holaOS\.app was not extracted from the final macOS zip/);
   assert.match(source, /codesign --verify --deep --strict --verbose=2 "\$\{extracted_app\}"/);
   assert.match(source, /spctl -a -vv -t exec "\$\{extracted_app\}"/);
   assert.match(source, /xcrun stapler validate "\$\{extracted_app\}"/);
@@ -172,7 +172,7 @@ test("manual CI workflow publishes desktop installers without standalone runtime
   assert.match(source, /artifact_only: true/);
   assert.doesNotMatch(source, /Verify published macOS release assets from GitHub/);
   assert.doesNotMatch(source, /gh release download "\$\{RELEASE_TAG\}"/);
-  assert.doesNotMatch(source, /published macOS zip is missing Holaboss\.app\/Contents\/Resources\/app-update\.yml/);
+  assert.doesNotMatch(source, /published macOS zip is missing holaOS\.app\/Contents\/Resources\/app-update\.yml/);
   assert.doesNotMatch(source, /raise "latest-mac\.yml path does not match uploaded zip"/);
   assert.doesNotMatch(source, /raise "beta-mac\.yml path does not match uploaded zip"/);
   assert.match(source, /publish-release:/);
@@ -200,10 +200,10 @@ test("manual CI workflow publishes desktop installers without standalone runtime
   assert.match(source, /rm -f "\$\{notes_path\}\.bak"/);
   assert.match(source, /tag_name=\$\{RELEASE_TAG\}/);
   assert.match(source, /target_commitish=\$\{RELEASE_SHA\}/);
-  assert.match(source, /mac_dmg_asset="release-assets\/macos-desktop\/Holaboss-macos-arm64\.dmg"/);
+  assert.match(source, /mac_dmg_asset="release-assets\/macos-desktop\/holaOS-macos-arm64\.dmg"/);
   assert.match(source, /mac_zip_asset="\$\(find release-assets\/macos-desktop -maxdepth 1 -name '\*\.zip' ! -name '\*\.blockmap' -print -quit\)"/);
   assert.match(source, /mac_zip_blockmap_asset="\$\{mac_zip_asset\}\.blockmap"/);
-  assert.match(source, /mac_intel_dmg_asset="release-assets\/macos-intel-desktop\/Holaboss-macos-x64\.dmg"/);
+  assert.match(source, /mac_intel_dmg_asset="release-assets\/macos-intel-desktop\/holaOS-macos-x64\.dmg"/);
   assert.match(source, /mac_intel_zip_asset="\$\(find release-assets\/macos-intel-desktop -maxdepth 1 -name '\*\.zip' ! -name '\*\.blockmap' -print -quit\)"/);
   assert.match(source, /mac_intel_zip_blockmap_asset="\$\{mac_intel_zip_asset\}\.blockmap"/);
   assert.match(source, /missing Intel macOS DMG release asset/);
@@ -218,10 +218,10 @@ test("manual CI workflow publishes desktop installers without standalone runtime
   assert.match(source, /append_upload_path "\$\{mac_intel_zip_asset\}"/);
   assert.match(source, /append_upload_path "\$\{mac_intel_zip_blockmap_asset\}"/);
   assert.match(source, /while IFS= read -r manifest_path; do\s+append_upload_path "\$\{manifest_path\}"/);
-  assert.match(source, /windows_installer_asset="\$\{windows_release_dir\}\/Holaboss-windows-x64-setup\.exe"/);
+  assert.match(source, /windows_installer_asset="\$\{windows_release_dir\}\/holaOS-windows-x64-setup\.exe"/);
   assert.match(source, /missing Windows installer release asset/);
   assert.match(source, /missing Windows installer blockmap release asset/);
-  assert.match(source, /does not reference Holaboss-windows-x64-setup\.exe/);
+  assert.match(source, /does not reference holaOS-windows-x64-setup\.exe/);
   assert.match(source, /missing Windows auto-update manifest release asset/);
   assert.match(source, /append_upload_path "\$\{windows_installer_asset\}"/);
   assert.match(source, /append_upload_path "\$\{windows_blockmap_asset\}"/);

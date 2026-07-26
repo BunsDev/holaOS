@@ -33,7 +33,7 @@ on:
         required: true
         type: string
       release_title:
-        description: Optional GitHub release title (defaults to Holaboss <version> Linux runtime)
+        description: Optional GitHub release title (defaults to holaOS <version> Linux runtime)
         required: false
         type: string
       prerelease:
@@ -84,7 +84,7 @@ jobs:
           release_version="${release_tag#[Hh]olaboss-}"
           release_title="${{ inputs.release_title }}"
           if [ -z "${release_title}" ]; then
-            release_title="Holaboss ${release_version} Linux runtime"
+            release_title="holaOS ${release_version} Linux runtime"
           fi
 
           release_channel="${{ inputs.release_channel }}"

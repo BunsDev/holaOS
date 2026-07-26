@@ -21,7 +21,7 @@ on:
         required: true
         type: string
       release_title:
-        description: Optional GitHub release title (defaults to Holaboss <version>)
+        description: Optional GitHub release title (defaults to holaOS <version>)
         required: false
         type: string
       prerelease:
@@ -234,7 +234,7 @@ jobs:
           release_title="${{ inputs.release_title }}"
           release_channel="${{ inputs.release_channel }}"
           if [ -z "${release_title}" ]; then
-            release_title="Holaboss ${release_version}"
+            release_title="holaOS ${release_version}"
           fi
           if [ "${release_channel}" != "latest" ] && [ "${release_channel}" != "beta" ]; then
             echo "release_channel must be one of: latest, beta; got ${release_channel}" >&2
@@ -302,7 +302,7 @@ jobs:
       RELEASE_CHANNEL: ${{ needs.ensure-release.outputs.release_channel }}
       HOLABOSS_RELEASE_CHANNEL: ${{ needs.ensure-release.outputs.release_channel }}
       DESKTOP_ASSET_PREFIX: holaboss-desktop-macos
-      DESKTOP_RELEASE_ASSET_NAME: Holaboss-macos-arm64.dmg
+      DESKTOP_RELEASE_ASSET_NAME: holaOS-macos-arm64.dmg
       MAC_CERTIFICATE: ${{ secrets.MAC_CERTIFICATE }}
       MAC_CERTIFICATE_PASSWORD: ${{ secrets.MAC_CERTIFICATE_PASSWORD }}
       APPLE_ID: ${{ secrets.APPLE_ID }}
@@ -486,7 +486,7 @@ jobs:
             echo "app-update.yml is missing from signed app bundle" >&2
             exit 1
           fi
-          packaged_app="${RUNNER_TEMP}/Holaboss.app"
+          packaged_app="${RUNNER_TEMP}/holaOS.app"
           rm -rf "${packaged_app}"
           ditto "${app_path}" "${packaged_app}"
           echo "app_path=${packaged_app}" >> "${GITHUB_OUTPUT}"
@@ -651,11 +651,11 @@ jobs:
               abort("#{path} files: is missing a .dmg entry") unless has_dmg
             ' "${mac_manifest_path}"
           done < <(find apps/desktop/out/release -maxdepth 1 -name '*-mac.yml' -print)
-          if ! zipinfo -1 "${zip_path}" | grep -Eq '^Holaboss\.app/'; then
-            echo "macOS zip does not contain Holaboss.app as the root app bundle" >&2
+          if ! zipinfo -1 "${zip_path}" | grep -Eq '^holaOS\.app/'; then
+            echo "macOS zip does not contain holaOS.app as the root app bundle" >&2
             exit 1
           fi
-          if ! zipinfo -1 "${zip_path}" | grep -Fxq 'Holaboss.app/Contents/Resources/app-update.yml'; then
+          if ! zipinfo -1 "${zip_path}" | grep -Fxq 'holaOS.app/Contents/Resources/app-update.yml'; then
             echo "app-update.yml is missing from final macOS zip" >&2
             exit 1
           fi
@@ -663,9 +663,9 @@ jobs:
           rm -rf "${extract_dir}"
           mkdir -p "${extract_dir}"
           ditto -x -k "${zip_path}" "${extract_dir}"
-          extracted_app="${extract_dir}/Holaboss.app"
+          extracted_app="${extract_dir}/holaOS.app"
           if [ ! -d "${extracted_app}" ]; then
-            echo "Holaboss.app was not extracted from the final macOS zip" >&2
+            echo "holaOS.app was not extracted from the final macOS zip" >&2
             exit 1
           fi
           verify_attempt=1
@@ -777,7 +777,7 @@ jobs:
       RELEASE_CHANNEL: ${{ needs.ensure-release.outputs.release_channel }}
       HOLABOSS_RELEASE_CHANNEL: ${{ needs.ensure-release.outputs.release_channel }}
       DESKTOP_ASSET_PREFIX: holaboss-desktop-windows
-      DESKTOP_RELEASE_ASSET_NAME: Holaboss-windows-x64-setup.exe
+      DESKTOP_RELEASE_ASSET_NAME: holaOS-windows-x64-setup.exe
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -1093,7 +1093,7 @@ jobs:
             throw "$manifestName was not generated"
           }
 
-          $stableInstallerName = "Holaboss-windows-x64-setup.exe"
+          $stableInstallerName = "holaOS-windows-x64-setup.exe"
           $manifestContent = Get-Content -LiteralPath $manifestPath -Raw
           if ($manifestContent -notmatch [regex]::Escape($stableInstallerName)) {
             throw "$manifestName does not reference $stableInstallerName"
@@ -1271,7 +1271,7 @@ jobs:
             fi
           done
 
-          mac_dmg_asset="release-assets/macos-desktop/Holaboss-macos-arm64.dmg"
+          mac_dmg_asset="release-assets/macos-desktop/holaOS-macos-arm64.dmg"
           mac_zip_asset="$(find release-assets/macos-desktop -maxdepth 1 -name '*.zip' ! -name '*.blockmap' -print -quit)"
           mac_zip_blockmap_asset="${mac_zip_asset}.blockmap"
           if [ ! -f "${mac_dmg_asset}" ]; then
@@ -1287,7 +1287,7 @@ jobs:
             exit 1
           fi
 
-          mac_intel_dmg_asset="release-assets/macos-intel-desktop/Holaboss-macos-x64.dmg"
+          mac_intel_dmg_asset="release-assets/macos-intel-desktop/holaOS-macos-x64.dmg"
           mac_intel_zip_asset="$(find release-assets/macos-intel-desktop -maxdepth 1 -name '*.zip' ! -name '*.blockmap' -print -quit)"
           mac_intel_zip_blockmap_asset="${mac_intel_zip_asset}.blockmap"
           if [ ! -f "${mac_intel_dmg_asset}" ]; then
@@ -1342,7 +1342,7 @@ jobs:
             windows_release_dir="${windows_release_dir}/release"
           fi
 
-          windows_installer_asset="${windows_release_dir}/Holaboss-windows-x64-setup.exe"
+          windows_installer_asset="${windows_release_dir}/holaOS-windows-x64-setup.exe"
           windows_blockmap_asset="${windows_installer_asset}.blockmap"
           if [ ! -f "${windows_installer_asset}" ]; then
             echo "missing Windows installer release asset" >&2
@@ -1363,8 +1363,8 @@ jobs:
             if [ ! -f "${windows_manifest_asset}" ]; then
               continue
             fi
-            if ! grep -q 'Holaboss-windows-x64-setup\.exe' "${windows_manifest_asset}"; then
-              echo "${windows_manifest_asset} does not reference Holaboss-windows-x64-setup.exe" >&2
+            if ! grep -q 'holaOS-windows-x64-setup\.exe' "${windows_manifest_asset}"; then
+              echo "${windows_manifest_asset} does not reference holaOS-windows-x64-setup.exe" >&2
               exit 1
             fi
             append_upload_path "${windows_manifest_asset}"
@@ -1398,8 +1398,8 @@ jobs:
       # subdirectory of a shared bucket like landing-assets/desktop/):
       #
       #   ${prefix}<channel>/<name>          — marketing downloads
-      #                                         (latest/Holaboss-macos-arm64.dmg,
-      #                                          beta/Holaboss-macos-arm64.dmg)
+      #                                         (latest/holaOS-macos-arm64.dmg,
+      #                                          beta/holaOS-macos-arm64.dmg)
       #   ${prefix}tags/<tag>/<name>         — pinned-version downloads
       #
       # The bare ${prefix}<name> (flat) layout used by PR #410 is gone —

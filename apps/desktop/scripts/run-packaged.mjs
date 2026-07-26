@@ -8,9 +8,9 @@ const outRoot = path.join(root, "out");
 
 const candidates = [
   explicitBin,
-  path.join(root, "out", "release", "mac-arm64", "Holaboss.app", "Contents", "MacOS", "Holaboss"),
-  path.join(root, "out", "release", "mac", "Holaboss.app", "Contents", "MacOS", "Holaboss"),
-  path.join(root, "out", "release", "win-unpacked", "Holaboss.exe")
+  path.join(root, "out", "release", "mac-arm64", "holaOS.app", "Contents", "MacOS", "holaOS"),
+  path.join(root, "out", "release", "mac", "holaOS.app", "Contents", "MacOS", "holaOS"),
+  path.join(root, "out", "release", "win-unpacked", "holaOS.exe")
 ].filter(Boolean);
 
 async function localReleaseCandidates() {
@@ -32,9 +32,9 @@ async function localReleaseCandidates() {
     ).sort((left, right) => right.mtimeMs - left.mtimeMs);
 
     return releaseDirs.flatMap(({ directoryPath }) => [
-      path.join(directoryPath, "mac-arm64", "Holaboss.app", "Contents", "MacOS", "Holaboss"),
-      path.join(directoryPath, "mac", "Holaboss.app", "Contents", "MacOS", "Holaboss"),
-      path.join(directoryPath, "win-unpacked", "Holaboss.exe"),
+      path.join(directoryPath, "mac-arm64", "holaOS.app", "Contents", "MacOS", "holaOS"),
+      path.join(directoryPath, "mac", "holaOS.app", "Contents", "MacOS", "holaOS"),
+      path.join(directoryPath, "win-unpacked", "holaOS.exe"),
     ]);
   } catch {
     return [];

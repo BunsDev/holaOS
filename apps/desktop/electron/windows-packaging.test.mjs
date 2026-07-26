@@ -55,7 +55,7 @@ test("windows packaging config and CI workflow support optional signing and NSIS
   assert.match(workflowSource, /if: \$\{\{ github\.event_name == 'workflow_dispatch' && inputs\.release_windows \}\}/);
   assert.match(workflowSource, /runs-on: windows-latest/);
   assert.match(workflowSource, /release_tag must match Holaboss-YYYY\.MDD\.R/);
-  assert.match(workflowSource, /DESKTOP_RELEASE_ASSET_NAME: Holaboss-windows-x64-setup\.exe/);
+  assert.match(workflowSource, /DESKTOP_RELEASE_ASSET_NAME: holaOS-windows-x64-setup\.exe/);
   assert.match(workflowSource, /- name: Validate Azure Trusted Signing credentials/);
   assert.match(workflowSource, /https:\/\/login\.microsoftonline\.com\/\$env:AZURE_TENANT_ID\/oauth2\/v2\.0\/token/);
   assert.match(workflowSource, /scope = "https:\/\/codesigning\.azure\.net\/\.default"/);

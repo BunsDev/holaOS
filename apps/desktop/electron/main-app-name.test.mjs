@@ -11,8 +11,8 @@ test("desktop main process uses Holaboss as the packaged app name", async () => 
   const source = await readFile(mainSourcePath, "utf8");
 
   assert.match(source, /electronApp\.setName\(initialDesktopAppName\(\)\);/);
-  assert.match(source, /const APP_DISPLAY_NAME = "Holaboss";/);
-  assert.match(source, /const MAC_APP_MENU_PRODUCT_LABEL = "Holaboss";/);
+  assert.match(source, /const APP_DISPLAY_NAME = "holaOS";/);
+  assert.match(source, /const MAC_APP_MENU_PRODUCT_LABEL = "holaOS";/);
   assert.match(
     source,
     /app\.setName\(\s*process\.platform === "darwin" && isDev\s*\?\s*MAC_APP_MENU_PRODUCT_LABEL\s*:\s*APP_DISPLAY_NAME,\s*\)/,

@@ -12,7 +12,7 @@ test("macOS development builds use a mock Chromium keychain to avoid Safe Storag
 
   assert.match(
     mainSource,
-    /function initialDesktopAppName\(\): string \{[\s\S]*return "Holaboss Dev";[\s\S]*return "Holaboss";[\s\S]*\}\s*\n\s*electronApp\.setName\(initialDesktopAppName\(\)\);/,
+    /function initialDesktopAppName\(\): string \{[\s\S]*return "holaOS Dev";[\s\S]*return "holaOS";[\s\S]*\}\s*\n\s*electronApp\.setName\(initialDesktopAppName\(\)\);/,
   );
   assert.match(
     mainSource,

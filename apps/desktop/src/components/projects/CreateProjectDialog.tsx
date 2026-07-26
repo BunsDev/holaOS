@@ -17,7 +17,7 @@ import { cn } from "@/lib/utils";
  *   existing → folder is fixed on disk; name is an editable display label.
  */
 
-const DEFAULT_PROJECTS_DIR_HOME_RELATIVE = "Documents/Holaboss";
+const DEFAULT_PROJECTS_DIR_HOME_RELATIVE = "Documents/holaOS";
 
 type Origin = "scratch" | "existing";
 

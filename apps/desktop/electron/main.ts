@@ -59,9 +59,9 @@ function initialDesktopAppName(): string {
     (!electronApp.isPackaged ||
       process.env.HOLABOSS_INTERNAL_DEV?.trim() === "1")
   ) {
-    return "Holaboss Dev";
+    return "holaOS Dev";
   }
-  return "Holaboss";
+  return "holaOS";
 }
 
 electronApp.setName(initialDesktopAppName());
@@ -282,9 +282,9 @@ import type {
   ProfileFingerprint,
 } from "../shared/browser-pane-protocol.js";
 
-const APP_DISPLAY_NAME = "Holaboss";
-const MAC_APP_MENU_PRODUCT_LABEL = "Holaboss";
-const MAC_DEV_APP_MENU_PRODUCT_LABEL = "Holaboss Dev";
+const APP_DISPLAY_NAME = "holaOS";
+const MAC_APP_MENU_PRODUCT_LABEL = "holaOS";
+const MAC_DEV_APP_MENU_PRODUCT_LABEL = "holaOS Dev";
 const AUTH_CALLBACK_PROTOCOL = "ai.holaboss.app";
 const DESKTOP_LAUNCH_ID = randomUUID();
 const nodeRequire = createRequire(__filename);
@@ -2436,7 +2436,7 @@ type MacPermissionResult = {
 // rest we open the relevant Settings pane for a manual grant. The agent calls
 // this (through the desktop bridge) when a host op fails for lack of a
 // permission, then retries. In dev the unsigned binary registers as "Electron";
-// a signed Holaboss.app registers as "Holaboss".
+// a signed holaOS.app registers as "Holaboss".
 async function ensureMacPermission(
   rawKind: string,
 ): Promise<MacPermissionResult> {
@@ -4022,7 +4022,7 @@ function browserAcceptedLanguages(): string {
 // `(KHTML, like Gecko)` marker and the `Chrome/…` token, then an `Electron/…`
 // token before Safari. Matching those positions (rather than the literal app
 // name via app.getName()) makes this robust to the product name — including
-// dev names with spaces ("Holaboss Dev") and any drift between the name baked
+// dev names with spaces ("holaOS Dev") and any drift between the name baked
 // into the UA and app.getName() at call time, which previously left the app
 // token in place and re-triggered CookieMismatch.
 function stripBrowserAppUserAgentTokens(userAgent: string): string {
@@ -6302,7 +6302,7 @@ function runtimeProviderLabel(providerId: string): string {
     normalized === "holaboss" ||
     normalized.includes("holaboss")
   ) {
-    return "Holaboss Proxy";
+    return "holaOS Proxy";
   }
   return providerId
     .split(/[-_]/)
@@ -23542,7 +23542,7 @@ function createAuthPopupHtml() {
         <div class="profileRow">
           <div id="avatar" class="avatar">H</div>
           <div class="identityWrap">
-            <div id="identityName" class="identityName">Holaboss account</div>
+            <div id="identityName" class="identityName">holaOS account</div>
             <div id="identity" class="identity">Loading session...</div>
           </div>
           <div id="badge" class="badge idle">Checking</div>
@@ -23723,7 +23723,7 @@ function createAuthPopupHtml() {
         const noticeText = state.authError || state.authMessage;
 
         els.avatar.textContent = sessionInitials(state.user);
-        els.identityName.textContent = isSignedIn ? (sessionDisplayName(state.user) || "Holaboss account") : "Holaboss account";
+        els.identityName.textContent = isSignedIn ? (sessionDisplayName(state.user) || "holaOS account") : "holaOS account";
         els.identity.textContent = isSignedIn ? (sessionEmail(state.user) || sessionUserId(state.user) || "Signed in") : "Not connected";
         els.badge.className = "badge " + badgeTone;
         els.badge.textContent = badgeLabel;

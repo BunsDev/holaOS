@@ -33,7 +33,7 @@ on:
         required: true
         type: string
       release_title:
-        description: Optional GitHub release title (defaults to Holaboss <version> Intel macOS desktop)
+        description: Optional GitHub release title (defaults to holaOS <version> Intel macOS desktop)
         required: false
         type: string
       prerelease:
@@ -61,7 +61,7 @@ permissions:
 env:
   RELEASE_GH_REPO: holaboss-ai/holaOS-releases
   DESKTOP_ASSET_PREFIX: holaboss-desktop-macos-intel
-  DESKTOP_RELEASE_ASSET_NAME: Holaboss-macos-x64.dmg
+  DESKTOP_RELEASE_ASSET_NAME: holaOS-macos-x64.dmg
 
 jobs:
   publish-intel-macos-desktop:
@@ -94,7 +94,7 @@ jobs:
           release_version="${release_tag#[Hh]olaboss-}"
           release_title="${{ inputs.release_title }}"
           if [ -z "${release_title}" ]; then
-            release_title="Holaboss ${release_version} Intel macOS desktop"
+            release_title="holaOS ${release_version} Intel macOS desktop"
           fi
 
           release_channel="${{ inputs.release_channel }}"
@@ -282,7 +282,7 @@ jobs:
             echo "app-update.yml is missing from signed Intel macOS app bundle" >&2
             exit 1
           fi
-          packaged_app="${RUNNER_TEMP}/Holaboss.app"
+          packaged_app="${RUNNER_TEMP}/holaOS.app"
           rm -rf "${packaged_app}"
           ditto "${app_path}" "${packaged_app}"
           echo "app_path=${packaged_app}" >> "${GITHUB_OUTPUT}"
@@ -464,11 +464,11 @@ jobs:
               abort("#{path} files: is missing a .dmg entry") unless has_dmg
             ' "${mac_manifest_path}"
           done < <(find apps/desktop/out/release -maxdepth 1 -name '*-mac.yml' -print)
-          if ! zipinfo -1 "${zip_path}" | grep -Eq '^Holaboss\.app/'; then
-            echo "Intel macOS zip does not contain Holaboss.app as the root app bundle" >&2
+          if ! zipinfo -1 "${zip_path}" | grep -Eq '^holaOS\.app/'; then
+            echo "Intel macOS zip does not contain holaOS.app as the root app bundle" >&2
             exit 1
           fi
-          if ! zipinfo -1 "${zip_path}" | grep -Fxq 'Holaboss.app/Contents/Resources/app-update.yml'; then
+          if ! zipinfo -1 "${zip_path}" | grep -Fxq 'holaOS.app/Contents/Resources/app-update.yml'; then
             echo "app-update.yml is missing from final Intel macOS zip" >&2
             exit 1
           fi
@@ -476,9 +476,9 @@ jobs:
           rm -rf "${extract_dir}"
           mkdir -p "${extract_dir}"
           ditto -x -k "${zip_path}" "${extract_dir}"
-          extracted_app="${extract_dir}/Holaboss.app"
+          extracted_app="${extract_dir}/holaOS.app"
           if [ ! -d "${extracted_app}" ]; then
-            echo "Holaboss.app was not extracted from the final Intel macOS zip" >&2
+            echo "holaOS.app was not extracted from the final Intel macOS zip" >&2
             exit 1
           fi
           verify_attempt=1

@@ -24,6 +24,6 @@ test("packaged runner can locate the latest local Windows packaging output", asy
 
   assert.match(source, /entry\.name\.startsWith\("release-local-"\)/);
   assert.match(source, /sort\(\(left, right\) => right\.mtimeMs - left\.mtimeMs\)/);
-  assert.match(source, /win-unpacked", "Holaboss\.exe"/);
+  assert.match(source, /win-unpacked", "holaOS\.exe"/);
   assert.match(source, /await localReleaseCandidates\(\)/);
 });

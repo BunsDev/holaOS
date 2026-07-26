@@ -180,7 +180,7 @@ const extraResources = [
 
 module.exports = {
   appId: "com.holaboss.workspace",
-  productName: "Holaboss",
+  productName: "holaOS",
   ...(appUpdatesEnabled ? { generateUpdatesFilesForAllChannels: true } : {}),
   directories: {
     output: "out/release"
@@ -194,7 +194,7 @@ module.exports = {
   asar: true,
   protocols: [
     {
-      name: "Holaboss Auth Callback",
+      name: "holaOS Auth Callback",
       schemes: [
         "ai.holaboss.app"
       ]
@@ -212,7 +212,7 @@ module.exports = {
     ...(macIdentity ? { identity: macIdentity } : {})
   },
   dmg: {
-    artifactName: "Holaboss-macos-${arch}.dmg"
+    artifactName: "holaOS-macos-${arch}.dmg"
   },
   ...(appUpdatesEnabled
     ? {

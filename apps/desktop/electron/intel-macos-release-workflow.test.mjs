@@ -30,7 +30,7 @@ test("intel macOS desktop workflow publishes a notarized x64 DMG and updater ass
   assert.match(workflowSource, /release_channel:\n\s+description: Desktop release channel metadata baked into the packaged config/);
   assert.match(workflowSource, /permissions:\n\s+contents: write/);
   assert.match(workflowSource, /RELEASE_GH_REPO: holaboss-ai\/holaOS-releases/);
-  assert.match(workflowSource, /DESKTOP_RELEASE_ASSET_NAME: Holaboss-macos-x64\.dmg/);
+  assert.match(workflowSource, /DESKTOP_RELEASE_ASSET_NAME: holaOS-macos-x64\.dmg/);
   assert.match(workflowSource, /runs-on: macos-15-intel/);
   assert.match(workflowSource, /publish-macos-intel-desktop requires an x64 runner; got \$\(uname -m\)/);
   assert.match(workflowSource, /Build macOS runtime bundle/);
@@ -38,7 +38,7 @@ test("intel macOS desktop workflow publishes a notarized x64 DMG and updater ass
   assert.match(workflowSource, /Build signed Intel macOS app bundle[\s\S]*HOLABOSS_RELEASE_CHANNEL: \$\{\{ steps\.release_meta\.outputs\.release_channel \}\}/);
   assert.match(workflowSource, /--mac dir \\\n\s+--x64 \\/);
   assert.match(workflowSource, /app-update\.yml is missing from signed Intel macOS app bundle/);
-  assert.match(workflowSource, /packaged_app="\$\{RUNNER_TEMP\}\/Holaboss\.app"/);
+  assert.match(workflowSource, /packaged_app="\$\{RUNNER_TEMP\}\/holaOS\.app"/);
   assert.match(workflowSource, /Build Intel macOS desktop release artifacts from notarized app bundle/);
   // dmg + zip are built as separate electron-builder calls inside the helper
   // script to work around a packing bug that stripped the Electron Framework
@@ -53,10 +53,10 @@ test("intel macOS desktop workflow publishes a notarized x64 DMG and updater ass
   assert.match(workflowSource, /beta-mac\.yml was not generated for stable-channel Intel macOS compatibility/);
   assert.match(workflowSource, /files: is missing a \.zip entry/);
   assert.match(workflowSource, /files: is missing a \.dmg entry/);
-  assert.match(workflowSource, /Intel macOS zip does not contain Holaboss\.app as the root app bundle/);
+  assert.match(workflowSource, /Intel macOS zip does not contain holaOS\.app as the root app bundle/);
   assert.match(workflowSource, /app-update\.yml is missing from final Intel macOS zip/);
   assert.match(workflowSource, /extract_dir="\$\{RUNNER_TEMP\}\/intel-mac-zip-signature-verify"/);
-  assert.match(workflowSource, /Holaboss\.app was not extracted from the final Intel macOS zip/);
+  assert.match(workflowSource, /holaOS\.app was not extracted from the final Intel macOS zip/);
   assert.match(workflowSource, /codesign --verify --deep --strict --verbose=2 "\$\{extracted_app\}"/);
   assert.match(workflowSource, /spctl -a -vv -t exec "\$\{extracted_app\}"/);
   assert.match(workflowSource, /xcrun stapler validate "\$\{extracted_app\}"/);

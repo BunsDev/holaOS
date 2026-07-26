@@ -18,7 +18,7 @@ interface UpdateReminderProps {
 
 function releaseVersionLabel(status: AppUpdateStatusPayload) {
   const releaseLabel = status.latestVersion || status.releaseName || "latest";
-  const normalized = releaseLabel.trim().replace(/^Holaboss\s+/i, "");
+  const normalized = releaseLabel.trim().replace(/^holaOS\s+/i, "");
   return normalized || "latest";
 }
 
