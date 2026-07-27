@@ -57,7 +57,7 @@ Context, preferences, and project history live in a single shared memory — sto
 - **Actually recallable** — structured and embedded, so the right context returns when it's needed.
 
 <p align="center">
-  <img src="docs/images/mem-tree.png" alt="holaOS memory tree" width="1280" />
+  <img src="docs/images/memory.png" alt="holaOS memory tree" width="1280" />
 </p>
 
 ### 💸 Models your way — built in, or bring your own
