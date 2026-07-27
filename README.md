@@ -83,7 +83,7 @@ Install apps from the in-workspace marketplace and they open as **real, interact
 
 ### 🧩 Skills, Integrations & MCP — teach it once, reuse everywhere
 
-- **Integrations** — connect Gmail, Notion, Slack, GitHub, Linear and 100+ more with one-click OAuth. Agents read and act across your tools, no glue code — and every agent inherits the same connections.
+- **Integrations** — connect Gmail, Notion, Slack, GitHub, Linear and 50+ more with one-click OAuth. Agents read and act across your tools, no glue code — and every agent inherits the same connections.
 - **MCP** — plug in any Model Context Protocol server to give your agents new tools. Bring your own, or install community MCP servers in one click.
 - **Skills** — package a workflow once; any agent runs it on demand.
 - **Combos** — bundle skills and integrations into a single one-click install.
