@@ -120,13 +120,15 @@ export function AssistantTurnOutputs({
     )
     .map((card) => (card as { output: WorkspaceOutputRecordPayload }).output);
 
-  const shareAllCount = Math.min(shareableCards.length, MAX_SHARE_IMAGES);
-  const shareAllLabel =
-    shareableCards.length > MAX_SHARE_IMAGES
-      ? `Share first ${shareAllCount} of ${shareableCards.length} to HolaHub`
-      : shareAllCount > 1
-        ? `Share ${shareAllCount} to HolaHub`
-        : "Share to HolaHub";
+  // A post holds MAX_SHARE_IMAGES artifacts. Past that the nudge stops being a
+  // one-click action and becomes the start of a choice — picking the first few
+  // on the user's behalf is not ours to do when they can see all of them.
+  const overCap = shareableCards.length > MAX_SHARE_IMAGES;
+  const shareAllLabel = overCap
+    ? `Pick ${MAX_SHARE_IMAGES} of ${shareableCards.length} to share`
+    : shareableCards.length > 1
+      ? `Share ${shareableCards.length} to HolaHub`
+      : "Share to HolaHub";
 
   // Quick-share every shareable output in the turn (the nudge's action; the
   // per-item checkboxes still let the user post a subset).
@@ -324,13 +326,27 @@ export function AssistantTurnOutputs({
           )}
           Share {selectedShareIds.size} to HolaHub
           {shareCredits == null ? "" : ` · win ${shareCredits} credits`}
+          {selectedShareIds.size >= MAX_SHARE_IMAGES && overCap
+            ? " · max"
+            : ""}
         </button>
       ) : discoverEnabled && shareableOutputIds.size >= 1 ? (
         shareCredits == null ? (
           <button
             className="group mt-1 flex h-8 items-center gap-2 self-start rounded-md px-2.5 text-left text-primary text-xs transition-colors hover:bg-primary/10 disabled:opacity-60"
             disabled={sharing}
-            onClick={shareAll}
+            onClick={
+              overCap
+                ? () =>
+                    setSelectedShareIds(
+                      new Set(
+                        shareableCards
+                          .slice(0, MAX_SHARE_IMAGES)
+                          .map((output) => output.id)
+                      )
+                    )
+                : shareAll
+            }
             type="button"
           >
             {sharing ? (
