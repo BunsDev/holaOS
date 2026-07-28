@@ -6,6 +6,7 @@ import type {
   ShareDraftSessionTurn,
 } from "@holaboss/app-host/protocol";
 import { toolkitDisplayName } from "@/lib/toolkitDisplay";
+import { parseSerializedQuotedSkillPrompt } from "../helpers";
 import type { ChatExecutionTimelineItem, ChatMessage } from "../types";
 
 // A minimal shape both WorkspaceOutputRecordPayload and the Remote API's
@@ -15,6 +16,8 @@ export type ShareableOutput = {
   id: string;
   file_path?: string | null;
   module_id?: string | null;
+  /** The turn that produced this output — how a share finds the exact prompt. */
+  input_id?: string | null;
 };
 
 const SHARE_IMAGE_MIME: Record<string, string> = {
@@ -290,6 +293,29 @@ export async function gatherSessionSnapshot(
     });
   }
   return { turns };
+}
+
+/**
+ * The prompt a viewer needs to make their own equivalent: the ask that produced
+ * these outputs, resolved through the output's `input_id`, falling back to the
+ * conversation's opening ask. Any quoted-skill command lines are stripped — the
+ * skills travel as items, and leaving the raw `/skill` lines in would seed a
+ * prompt that only runs for someone who happens to have them installed.
+ */
+export function resolveRecipePrompt(
+  outputs: ShareableOutput[],
+  messages: ChatMessage[]
+): string {
+  const inputId = outputs.find((o) => o.input_id)?.input_id;
+  const byInput = inputId
+    ? messages.find((m) => m.role === "user" && m.id === inputId)
+    : undefined;
+  const source = byInput ?? messages.find((m) => m.role === "user");
+  const text = (source?.text ?? "").trim();
+  if (!text) {
+    return "";
+  }
+  return parseSerializedQuotedSkillPrompt(text).body.trim() || text;
 }
 
 // Attribute a share to the apps that actually produced these outputs (their

@@ -1,7 +1,9 @@
 import type {
   ShareDraft,
+  ShareDraftForm,
   ShareDraftImage,
   ShareDraftItem,
+  ShareDraftRecipe,
   ShareDraftSessionTurn,
 } from "@holaboss/app-host/protocol";
 import { useCallback } from "react";
@@ -37,6 +39,10 @@ export function useShareToHolahub() {
       images?: ShareDraftImage[];
       videos?: ShareDraftImage[];
       items?: ShareDraftItem[];
+      /** Which share mode produced this — carried instead of re-inferred. */
+      form?: ShareDraftForm;
+      /** The prompt + model that made the Output, for Reproduce. */
+      recipe?: ShareDraftRecipe;
       /** When set, share the whole conversation as a "session" post. */
       session?: { turns: ShareDraftSessionTurn[] };
     }) => {
@@ -57,6 +63,8 @@ export function useShareToHolahub() {
         images,
         videos,
         items: input.items ?? [],
+        ...(input.form ? { form: input.form } : {}),
+        ...(input.recipe?.prompt.trim() ? { recipe: input.recipe } : {}),
         source: "desktop_chat",
         ...(sessionTurns.length > 0 ? { session: { turns: sessionTurns } } : {}),
       };

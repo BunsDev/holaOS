@@ -17,6 +17,7 @@ import { AssistantTurn } from "./AssistantTurn";
 import {
   gatherSessionSnapshot,
   gatherShareAttributionItems,
+  resolveRecipePrompt,
   gatherShareFiles,
   gatherShareImages,
   gatherShareVideos,
@@ -150,7 +151,12 @@ export function SharePreviewPane() {
     const items = gatherShareAttributionItems(
       selectedTurns.flatMap((t) => (t.outputs ?? []) as ShareableOutput[])
     );
-    await shareToHolahub({ body: caption, items, session: snapshot });
+    await shareToHolahub({
+      body: caption,
+      items,
+      form: "conversation",
+      session: snapshot,
+    });
   };
 
   const postOutputs = async () => {
@@ -168,6 +174,8 @@ export function SharePreviewPane() {
     // Seed the apps that made these outputs; the user adds any skills/MCPs in the
     // composer's attach picker next.
     const items = gatherShareAttributionItems(chosenOutputs);
+    // What a viewer reproduces from: the ask that produced these artifacts.
+    const recipe = { prompt: resolveRecipePrompt(chosenOutputs, messages), model: "" };
     // Hidden context so the composer's "Draft with AI" can caption the artifact
     // from what the assistant said while making it.
     const sourceText = messages
@@ -190,11 +198,21 @@ export function SharePreviewPane() {
         body: caption,
         sourceText,
         items,
+        form: "output",
+        recipe,
         session: { turns: [turn] },
       });
       return;
     }
-    await shareToHolahub({ body: caption, sourceText, images, videos, items });
+    await shareToHolahub({
+      body: caption,
+      sourceText,
+      images,
+      videos,
+      items,
+      form: "output",
+      recipe,
+    });
   };
 
   const post = async () => {
