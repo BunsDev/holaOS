@@ -120,6 +120,14 @@ export function AssistantTurnOutputs({
     )
     .map((card) => (card as { output: WorkspaceOutputRecordPayload }).output);
 
+  const shareAllCount = Math.min(shareableCards.length, MAX_SHARE_IMAGES);
+  const shareAllLabel =
+    shareableCards.length > MAX_SHARE_IMAGES
+      ? `Share first ${shareAllCount} of ${shareableCards.length} to HolaHub`
+      : shareAllCount > 1
+        ? `Share ${shareAllCount} to HolaHub`
+        : "Share to HolaHub";
+
   // Quick-share every shareable output in the turn (the nudge's action; the
   // per-item checkboxes still let the user post a subset).
   const shareAll = () => {
@@ -320,27 +328,18 @@ export function AssistantTurnOutputs({
       ) : discoverEnabled && shareableOutputIds.size >= 1 ? (
         shareCredits == null ? (
           <button
-            className="group mt-1 flex w-full items-center gap-3 rounded-xl bg-primary/8 px-3.5 py-2.5 text-left ring-1 ring-primary/15 ring-inset transition-colors hover:bg-primary/12 disabled:opacity-60"
+            className="group mt-1 flex h-8 items-center gap-2 self-start rounded-md px-2.5 text-left text-primary text-xs transition-colors hover:bg-primary/10 disabled:opacity-60"
             disabled={sharing}
             onClick={shareAll}
             type="button"
           >
-            <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-primary/15 text-primary">
-              {sharing ? (
-                <Loader2 className="size-4 animate-spin" />
-              ) : (
-                <Upload className="size-4" strokeWidth={1.9} />
-              )}
-            </span>
-            <span className="min-w-0 flex-1 leading-tight">
-              <span className="block font-medium text-primary text-sm">
-                Share to HolaHub
-              </span>
-              <span className="block text-muted-foreground text-xs">
-                Show your creation to the community
-              </span>
-            </span>
-            <ArrowUpRight className="size-4 shrink-0 text-primary transition-transform group-hover:translate-x-0.5" />
+            {sharing ? (
+              <Loader2 className="size-3.5 shrink-0 animate-spin" />
+            ) : (
+              <Upload className="size-3.5 shrink-0" strokeWidth={1.9} />
+            )}
+            <span className="font-medium">{shareAllLabel}</span>
+            <ArrowUpRight className="size-3.5 shrink-0 transition-transform group-hover:translate-x-0.5" />
           </button>
         ) : (
           <button
