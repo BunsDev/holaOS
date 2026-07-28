@@ -341,6 +341,15 @@ export interface ShareSessionPayload {
 }
 export const shareSessionPayloadAtom = atom<ShareSessionPayload | null>(null);
 
+/** A host hand-off asking the chat to open on a particular model (Reproduce
+ *  carrying the model its Output was made on). Consumed by ChatPane, which
+ *  ignores a model this install does not have. */
+export interface ChatModelRequest {
+  model: string;
+  requestKey: number;
+}
+export const chatModelRequestAtom = atom<ChatModelRequest | null>(null);
+
 /** How the "Share to HolaHub" composer opens: the whole conversation (a
  *  transcript "session" post) or just the produced artifacts (a media "post"). */
 export type ShareMode = "conversation" | "outputs";

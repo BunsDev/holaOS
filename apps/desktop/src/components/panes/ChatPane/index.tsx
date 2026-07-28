@@ -3456,6 +3456,8 @@ interface ChatPaneProps {
   onSessionOpenRequestConsumed?: (requestKey: number) => void;
   composerPrefillRequest?: ChatPaneComposerPrefillRequest | null;
   onComposerPrefillConsumed?: (requestKey: number) => void;
+  chatModelRequest?: { model: string; requestKey: number } | null;
+  onChatModelRequestConsumed?: (requestKey: number) => void;
   localAttachmentRequest?: ChatPaneLocalAttachmentRequest | null;
   onLocalAttachmentRequestConsumed?: (requestKey: number) => void;
   explorerAttachmentRequest?: ChatPaneExplorerAttachmentRequest | null;
@@ -3504,6 +3506,8 @@ export function ChatPane({
   onSessionOpenRequestConsumed,
   composerPrefillRequest = null,
   onComposerPrefillConsumed,
+  chatModelRequest = null,
+  onChatModelRequestConsumed,
   localAttachmentRequest = null,
   onLocalAttachmentRequestConsumed,
   explorerAttachmentRequest = null,
@@ -9587,6 +9591,26 @@ export function ChatPane({
     },
     [activeSessionId, hasMessages],
   );
+  // A host hand-off (Reproduce) asking to open on the model the shared Output was
+  // made with. Applied through the same path as the composer's own picker, and
+  // ignored when this install has no such model — never block the hand-off.
+  const lastModelRequestKeyRef = useRef(0);
+  useEffect(() => {
+    if (!chatModelRequest || chatModelRequest.requestKey === lastModelRequestKeyRef.current) {
+      return;
+    }
+    lastModelRequestKeyRef.current = chatModelRequest.requestKey;
+    const wanted = chatModelRequest.model.trim();
+    if (wanted && availableChatModelOptions.some((o) => o.value === wanted)) {
+      applyComposerModelSelection(wanted);
+    }
+    onChatModelRequestConsumed?.(chatModelRequest.requestKey);
+  }, [
+    chatModelRequest,
+    availableChatModelOptions,
+    applyComposerModelSelection,
+    onChatModelRequestConsumed,
+  ]);
   const handleSwitchModelFromError = useCallback(
     (modelToken: string) => {
       applyComposerModelSelection(modelToken);

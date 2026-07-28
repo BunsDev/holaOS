@@ -3,6 +3,7 @@ import { useSetAtom } from "jotai";
 import { useEffect, useRef } from "react";
 import {
   chatAppContextAttachmentRequestAtom,
+  chatModelRequestAtom,
   chatComposerPrefillAtom,
   chatPanelViewAtom,
   chatSessionOpenRequestAtom,
@@ -69,6 +70,7 @@ export function useHostOpenChat(): void {
   const setAppContextAttachmentRequest = useSetAtom(
     chatAppContextAttachmentRequestAtom,
   );
+  const setChatModelRequest = useSetAtom(chatModelRequestAtom);
   const seqRef = useRef(0);
 
   useEffect(() => {
@@ -92,6 +94,16 @@ export function useHostOpenChat(): void {
         ...prev,
         [sessionId]: new Date().toISOString(),
       }));
+
+      const requestedModel =
+        typeof payload.input?.model === "string" ? payload.input.model.trim() : "";
+      if (requestedModel) {
+        seqRef.current += 1;
+        setChatModelRequest({
+          model: requestedModel,
+          requestKey: seqRef.current,
+        });
+      }
 
       const prompt =
         typeof payload.input?.prompt === "string" ? payload.input.prompt : "";
@@ -143,6 +155,7 @@ export function useHostOpenChat(): void {
     setLastViewedMap,
     setFocusMode,
     setProjectView,
+    setChatModelRequest,
     setWorkspaceOverlay,
     setAppContextAttachmentRequest,
   ]);

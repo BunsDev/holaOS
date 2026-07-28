@@ -104,6 +104,10 @@ export interface ChatStartInput {
   /** Skills to quote in the composer as skill chips (their ids == workspace
    *  skill_id). Rendered as `/skill` chips, not generic context pills. */
   skillIds?: string[];
+  /** Open the session on this model (a resolvable id, not a display name). A
+   *  model the viewer does not have falls back to their default rather than
+   *  failing the hand-off — a Reproduce should never be blocked by it. */
+  model?: string;
   /** Create a fresh session (default true). */
   newSession?: boolean;
   /** Auto-send instead of leaving an editable draft (default false). */
