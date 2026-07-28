@@ -30,6 +30,7 @@ import { billingRpcFetch } from "@/lib/app-sdk-client";
 import { useQuery } from "@tanstack/react-query";
 import {
   gatherShareAttributionItems,
+  resolveOutputModel,
   gatherShareImages,
   gatherShareVideos,
   isShareableMediaOutput,
@@ -136,6 +137,14 @@ export function AssistantTurnOutputs({
           images,
           videos,
           items: gatherShareAttributionItems(shareableCards),
+          form: "output",
+          // A quick share knows what generated these but not the ask behind
+          // them — the full share pane is where a prompt gets resolved.
+          recipe: {
+            prompt: "",
+            model: "",
+            outputModel: resolveOutputModel(shareableCards),
+          },
         });
       })
       .finally(() => setSharing(false));
@@ -174,6 +183,12 @@ export function AssistantTurnOutputs({
           images,
           videos,
           items: gatherShareAttributionItems(chosen),
+          form: "output",
+          recipe: {
+            prompt: "",
+            model: "",
+            outputModel: resolveOutputModel(chosen),
+          },
         });
         setSelectedShareIds(new Set());
       })

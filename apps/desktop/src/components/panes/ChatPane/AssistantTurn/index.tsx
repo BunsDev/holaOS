@@ -10,6 +10,7 @@ import { useShareToHolahub } from "@/components/layout/shell/useShareToHolahub";
 import { useAtomValue } from "jotai";
 import {
   gatherShareAttributionItems,
+  resolveOutputModel,
   gatherShareImages,
   gatherShareVideos,
   isShareableMediaOutput,
@@ -445,6 +446,12 @@ function AssistantTurnComponent({
                             images,
                             videos,
                             items: gatherShareAttributionItems(outputs),
+                            form: "output",
+                            recipe: {
+                              prompt: "",
+                              model: "",
+                              outputModel: resolveOutputModel(outputs),
+                            },
                           })
                         );
                       }

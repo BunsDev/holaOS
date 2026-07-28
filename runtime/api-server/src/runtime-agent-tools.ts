@@ -5863,15 +5863,16 @@ export class RuntimeAgentToolsService {
       throw new RuntimeAgentToolsServiceError(400, "image_prompt_required", "prompt is required");
     }
     try {
+      const imageOutputRoot = this.store.sessionOutputRoot({
+        workspaceId: params.workspaceId,
+        sessionId,
+      });
       const generated = await generateWorkspaceImage({
         workspaceRoot: this.options.workspaceRoot,
         workspaceId: params.workspaceId,
         // Project-bound sessions write artifacts under the project dir, not the
         // workspace root (mirrors resolveOutputAbsolutePath's read side).
-        outputRoot: this.store.sessionOutputRoot({
-          workspaceId: params.workspaceId,
-          sessionId,
-        }),
+        outputRoot: imageOutputRoot,
         sessionId,
         inputId: "runtime-tool",
         selectedModel: params.selectedModel,
@@ -5890,7 +5891,13 @@ export class RuntimeAgentToolsService {
         outputType: "image",
         title: path.basename(generated.filePath),
         status: "completed",
-        filePath: generated.filePath,
+        // Absolute, so the end-of-turn scan's dedup — which compares absolute
+        // paths — matches this row. A relative path would be resolved against
+        // the project root instead of the session root this image was written
+        // to, miss, and the scan would register the same file a second time.
+        filePath: path.isAbsolute(generated.filePath)
+          ? generated.filePath
+          : path.join(imageOutputRoot, generated.filePath),
         sessionId,
         inputId: normalizedString(params.inputId) || null,
         artifactId: randomUUID(),
