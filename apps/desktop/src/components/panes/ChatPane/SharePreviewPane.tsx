@@ -18,6 +18,7 @@ import {
   gatherSessionSnapshot,
   gatherQuotedToolItems,
   gatherShareAttributionItems,
+  resolveOutputModel,
   resolveRecipePrompt,
   gatherShareFiles,
   gatherShareImages,
@@ -196,7 +197,7 @@ export function SharePreviewPane() {
     const recipe = {
       prompt: resolveRecipePrompt(chosenOutputs, messages),
       model: payload.modelId ?? "",
-      outputModel: "",
+      outputModel: resolveOutputModel(chosenOutputs),
     };
     // Hidden context so the composer's "Draft with AI" can caption the artifact
     // from what the assistant said while making it.

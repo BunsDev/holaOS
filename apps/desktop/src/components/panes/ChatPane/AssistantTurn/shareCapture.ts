@@ -18,6 +18,7 @@ export type ShareableOutput = {
   module_id?: string | null;
   /** The turn that produced this output — how a share finds the exact prompt. */
   input_id?: string | null;
+  metadata?: Record<string, unknown> | null;
 };
 
 const SHARE_IMAGE_MIME: Record<string, string> = {
@@ -362,6 +363,27 @@ export function gatherQuotedToolItems(
     }
   }
   return items;
+}
+
+/**
+ * The model that actually generated these artifacts, read from the output
+ * metadata the runtime already stamps (`model` on a written report, `model_id`
+ * on a generated image). Display-only: a reader of a generated sample should be
+ * able to see what made it, but it is not a session model and is never seeded
+ * as one. Empty when the producing tool records no model.
+ */
+export function resolveOutputModel(outputs: ShareableOutput[]): string {
+  for (const output of outputs) {
+    const meta = output.metadata;
+    if (!meta) {
+      continue;
+    }
+    const value = meta.model ?? meta.model_id;
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+  return "";
 }
 
 // Attribute a share to the apps that actually produced these outputs (their
