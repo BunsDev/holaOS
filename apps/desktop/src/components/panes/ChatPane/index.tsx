@@ -56,6 +56,7 @@ import {
   Waypoints,
   X,
 } from "@/components/ui/icons";
+import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { DotmSquare3 } from "@/components/ui/dotm-square-3";
@@ -9601,8 +9602,18 @@ export function ChatPane({
     }
     lastModelRequestKeyRef.current = chatModelRequest.requestKey;
     const wanted = chatModelRequest.model.trim();
-    if (wanted && availableChatModelOptions.some((o) => o.value === wanted)) {
+    if (!wanted) {
+      onChatModelRequestConsumed?.(chatModelRequest.requestKey);
+      return;
+    }
+    if (availableChatModelOptions.some((o) => o.value === wanted)) {
       applyComposerModelSelection(wanted);
+    } else {
+      // Falling back silently would let someone believe they reproduced
+      // something on the model it was made with.
+      toast.info(`Original used ${displayModelLabel(wanted)}`, {
+        description: "You don't have that model — using your default instead.",
+      });
     }
     onChatModelRequestConsumed?.(chatModelRequest.requestKey);
   }, [
