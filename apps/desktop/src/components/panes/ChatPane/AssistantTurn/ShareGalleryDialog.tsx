@@ -1,5 +1,5 @@
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Check, Loader2, Upload } from "@/components/ui/icons";
 import { cn } from "@/lib/utils";
@@ -34,10 +34,21 @@ export function ShareGalleryDialog({
   const [selected, setSelected] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
 
+  // The gallery snapshots what it was opened on. Without this guard a caller
+  // that rebuilds its outputs array each render re-triggers the load, which
+  // sets state, which renders again — the dialog flickers instead of loading.
+  const loadedKeyRef = useRef<string | null>(null);
+
   useEffect(() => {
     if (!open) {
+      loadedKeyRef.current = null;
       return;
     }
+    const key = outputs.map((o) => o.id).join(",");
+    if (loadedKeyRef.current === key) {
+      return;
+    }
+    loadedKeyRef.current = key;
     setSelected(outputs.slice(0, SHARE_GALLERY_MAX).map((o) => o.id));
     setLoading(true);
     let cancelled = false;

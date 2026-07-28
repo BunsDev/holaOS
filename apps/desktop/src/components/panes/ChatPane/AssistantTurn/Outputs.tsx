@@ -53,7 +53,7 @@ import { cn } from "@/lib/utils";
 import { ShareGalleryDialog } from "./ShareGalleryDialog";
 import { useWorkspaceDesktop } from "@/lib/workspaceDesktop";
 import { useAtomValue, useSetAtom } from "jotai";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
   dedupeOutputsForDisplay,
   OutputArtifactIcon,
@@ -86,7 +86,10 @@ export function AssistantTurnOutputs({
   const [galleryOpen, setGalleryOpen] = useState(false);
   const [sharing, setSharing] = useState(false);
 
-  const { cards } = selectTurnResultCards(dedupeOutputsForDisplay(outputs));
+  const { cards } = useMemo(
+    () => selectTurnResultCards(dedupeOutputsForDisplay(outputs)),
+    [outputs],
+  );
 
   // Multi-share: when a turn produced ≥2 shareable media artifacts, let the user
   // pick a subset and post them together to HolaHub (a single turn-level Share
@@ -115,11 +118,17 @@ export function AssistantTurnOutputs({
   });
   const shareCredits = shareReward?.credits ?? null;
 
-  const shareableCards = cards
-    .filter(
-      (card) => card.kind === "output" && isShareableMediaOutput(card.output),
-    )
-    .map((card) => (card as { output: WorkspaceOutputRecordPayload }).output);
+  // Stable identity: this is handed to the gallery, whose load effect keys off
+  // it — a fresh array every render would restart the load every render.
+  const shareableCards = useMemo(
+    () =>
+      cards
+        .filter(
+          (card) => card.kind === "output" && isShareableMediaOutput(card.output),
+        )
+        .map((card) => (card as { output: WorkspaceOutputRecordPayload }).output),
+    [cards],
+  );
 
   // A post holds MAX_SHARE_IMAGES artifacts. Past that the nudge stops being a
   // one-click action and becomes the start of a choice — picking the first few
