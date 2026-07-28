@@ -64,7 +64,15 @@ export function useShareToHolahub() {
         videos,
         items: input.items ?? [],
         ...(input.form ? { form: input.form } : {}),
-        ...(input.recipe?.prompt.trim() ? { recipe: input.recipe } : {}),
+        // Any one field is worth carrying: a conversation share knows the model
+        // but has no prompt, and a quick share knows only what generated the
+        // artifact. Gating on the prompt dropped both on the floor.
+        ...(input.recipe &&
+        (input.recipe.prompt.trim() ||
+          input.recipe.model.trim() ||
+          input.recipe.outputModel.trim())
+          ? { recipe: input.recipe }
+          : {}),
         source: "desktop_chat",
         ...(sessionTurns.length > 0 ? { session: { turns: sessionTurns } } : {}),
       };
