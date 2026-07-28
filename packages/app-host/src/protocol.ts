@@ -10,8 +10,9 @@
 
 /** Bridge protocol version. Additive ops that a page must feature-detect bump
  *  this so `window.__holabossHost.version` gates them; a hosted page checks
- *  `version >= N`. v2 adds `item.open`; v3 adds `holahub.consume-pending-share`. */
-export const BRIDGE_VERSION = 3 as const;
+ *  `version >= N`. v2 adds `item.open`; v3 adds `holahub.consume-pending-share`;
+ *  v4 adds `colorScheme` / `onColorSchemeChange`. */
+export const BRIDGE_VERSION = 4 as const;
 
 /** The global the app-surface preload injects into the hosted HolaApp page. */
 export const HOST_GLOBAL_KEY = "__holabossHost" as const;
@@ -20,7 +21,19 @@ export const HOST_GLOBAL_KEY = "__holabossHost" as const;
 export const HOST_IPC = {
   capabilities: "appSurface:host:capabilities",
   invoke: "appSurface:host:invoke",
+  /** Synchronous, so the preload has the scheme before the page's first inline
+   *  script runs — a hosted page that paints one frame in the wrong theme
+   *  flashes white on every open. */
+  colorScheme: "appSurface:host:color-scheme",
 } as const;
+
+/** The desktop's effective light/dark scheme, mirrored into hosted pages so a
+ *  surface reads as part of the app instead of a differently-themed website. */
+export type HostColorScheme = "light" | "dark";
+
+/** Event main → app-surface preload: the desktop color scheme changed. */
+export const HOST_COLOR_SCHEME_CHANGED =
+  "appSurface:host:color-scheme-changed" as const;
 
 /** Event main → shell renderer: "open this chat with this input". */
 export const HOST_RENDERER_EVENT = "host:openChat" as const;
@@ -366,4 +379,10 @@ export interface HolabossHost {
     op: Op,
     payload: HostOpMap[Op]["input"],
   ): Promise<HostResult<HostOpMap[Op]["result"]>>;
+  /** The desktop's current scheme. Absent on a host older than v4 — fall back to
+   *  the page's own `prefers-color-scheme`. */
+  colorScheme?(): HostColorScheme;
+  /** Subscribe to desktop scheme changes (v4+). Listeners live as long as the
+   *  document; the preload drops them on navigation. */
+  onColorSchemeChange?(listener: (scheme: HostColorScheme) => void): void;
 }
