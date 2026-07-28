@@ -167,6 +167,10 @@ export function SharePreviewPane() {
       body: caption,
       items,
       form: "conversation",
+      // No prompt: a conversation is shared for its configuration, not its ask.
+      // The model is the configuration — without it "Same setup" installs the
+      // tools and then opens the session on whatever the viewer already had.
+      recipe: { prompt: "", model: payload.modelId ?? "", outputModel: "" },
       session: snapshot,
     });
   };
