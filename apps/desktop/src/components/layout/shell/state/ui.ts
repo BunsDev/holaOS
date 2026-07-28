@@ -325,6 +325,13 @@ export interface ShareSessionPayload {
   workspaceId: string | null;
   /** Friendly name of the session's active model (e.g. "Claude Opus 4.8"). */
   model: string;
+  /** The same model as a resolvable id (e.g. "anthropic/claude-sonnet-4-6") —
+   *  what a Recipe stores, since the display name cannot be selected again. */
+  modelId: string;
+  /** skill id → title, and integration slug → name, so a share can name the
+   *  tools it detects without reaching back into the composer's state. */
+  skillNames: Record<string, string>;
+  integrationNames: Record<string, string>;
   // Render context so the preview renders turns exactly as the live chat does
   // (reusing the real UserTurn/AssistantTurn components).
   label: string;

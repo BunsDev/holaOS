@@ -9861,6 +9861,18 @@ export function ChatPane({
               messages: displayMessages,
               workspaceId: (selectedWorkspaceId || "").trim() || null,
               model: selectedModelDisplayLabel,
+              modelId: resolvedChatModel,
+              skillNames: Object.fromEntries(
+                [...availableWorkspaceSkillMap.entries()].map(([id, skill]) => [
+                  id,
+                  skill?.title ?? id,
+                ]),
+              ),
+              integrationNames: Object.fromEntries(
+                Object.entries(composioToolkitsByProvider).map(
+                  ([slug, toolkit]) => [slug, toolkit?.name ?? slug],
+                ),
+              ),
               label: assistantLabel,
               mode: assistantMode,
               harnessId: activeSessionRecord?.harness_id ?? "pi",

@@ -16,6 +16,7 @@ import { cn } from "@/lib/utils";
 import { AssistantTurn } from "./AssistantTurn";
 import {
   gatherSessionSnapshot,
+  gatherQuotedToolItems,
   gatherShareAttributionItems,
   resolveRecipePrompt,
   gatherShareFiles,
@@ -95,6 +96,13 @@ export function SharePreviewPane() {
   const [collapsedTrace, setCollapsedTrace] = useState<Record<string, boolean>>(
     {}
   );
+  const toolNames = useMemo(
+    () => ({
+      skills: payload?.skillNames ?? {},
+      integrations: payload?.integrationNames ?? {},
+    }),
+    [payload]
+  );
   const [includeModel, setIncludeModel] = useState(true);
   const [caption, setCaption] = useState("");
   const [posting, setPosting] = useState(false);
@@ -148,9 +156,12 @@ export function SharePreviewPane() {
     }
     // Credit the apps that actually produced this conversation's outputs, so a
     // shared session shows "Made with <App>" (not just skills).
-    const items = gatherShareAttributionItems(
-      selectedTurns.flatMap((t) => (t.outputs ?? []) as ShareableOutput[])
-    );
+    const items = [
+      ...gatherQuotedToolItems(selectedTurns, toolNames),
+      ...gatherShareAttributionItems(
+        selectedTurns.flatMap((t) => (t.outputs ?? []) as ShareableOutput[])
+      ),
+    ];
     await shareToHolahub({
       body: caption,
       items,
@@ -173,11 +184,18 @@ export function SharePreviewPane() {
     }
     // Seed the apps that made these outputs; the user adds any skills/MCPs in the
     // composer's attach picker next.
-    const items = gatherShareAttributionItems(chosenOutputs);
+    const sourceInputIds = new Set(
+      chosenOutputs.map((o) => o.input_id).filter(Boolean)
+    );
+    const sourceTurns = messages.filter((m) => sourceInputIds.has(m.id));
+    const items = [
+      ...gatherQuotedToolItems(sourceTurns, toolNames),
+      ...gatherShareAttributionItems(chosenOutputs),
+    ];
     // What a viewer reproduces from: the ask that produced these artifacts.
     const recipe = {
       prompt: resolveRecipePrompt(chosenOutputs, messages),
-      model: "",
+      model: payload.modelId ?? "",
       outputModel: "",
     };
     // Hidden context so the composer's "Draft with AI" can caption the artifact

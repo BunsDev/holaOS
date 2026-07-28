@@ -318,6 +318,52 @@ export function resolveRecipePrompt(
   return parseSerializedQuotedSkillPrompt(text).body.trim() || text;
 }
 
+/**
+ * The tools the sharer explicitly reached for in these turns. A quoted skill is
+ * a detection — they picked it out of the composer and it ran — so it travels as
+ * `derived` and the composer will not let them drop it. A quoted integration is
+ * a prerequisite rather than an actor (it surfaces as an app or MCP call when it
+ * is really used), so it rides along as a plain recommendation.
+ */
+export function gatherQuotedToolItems(
+  messages: ChatMessage[],
+  names: { skills: Record<string, string>; integrations: Record<string, string> }
+): ShareDraftItem[] {
+  const items: ShareDraftItem[] = [];
+  const seen = new Set<string>();
+  for (const message of messages) {
+    if (message.role !== "user") {
+      continue;
+    }
+    const quoted = parseSerializedQuotedSkillPrompt(message.text ?? "");
+    for (const skillId of quoted.skillIds) {
+      const key = `skill:${skillId}`;
+      if (skillId && !seen.has(key)) {
+        seen.add(key);
+        items.push({
+          type: "skill",
+          ref: skillId,
+          name: names.skills[skillId] ?? skillId,
+          origin: "derived",
+        });
+      }
+    }
+    for (const slug of quoted.integrationSlugs) {
+      const key = `integration:${slug}`;
+      if (slug && !seen.has(key)) {
+        seen.add(key);
+        items.push({
+          type: "integration",
+          ref: slug,
+          name: names.integrations[slug] ?? slug,
+          origin: "attached",
+        });
+      }
+    }
+  }
+  return items;
+}
+
 // Attribute a share to the apps that actually produced these outputs (their
 // `module_id`), not every capability installed — so the credited/installable
 // items reflect what made the content.
