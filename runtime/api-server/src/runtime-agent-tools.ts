@@ -668,6 +668,10 @@ interface SyncedSubagentRunState {
 export interface RuntimeAgentToolsGenerateImageParams {
   workspaceId: string;
   sessionId?: string | null;
+  /** The turn this image belongs to. Without it the recorded output is not
+   *  turn-scoped, and the end-of-turn file scan registers the file a second
+   *  time instead of deduping against what this tool already recorded. */
+  inputId?: string | null;
   selectedModel?: string | null;
   prompt: string;
   filename?: string | null;
@@ -5874,6 +5878,34 @@ export class RuntimeAgentToolsService {
         prompt,
         filename: params.filename,
         size: params.size,
+      });
+      // Register the image as this turn's output ourselves rather than leaving it
+      // to the end-of-turn file scan. The scan only sees "a new file appeared",
+      // so an image recorded that way carries no trace of what generated it —
+      // and which model made a picture is exactly what someone looking at it
+      // later wants to know. The turn-scoped dedup guard means recording it here
+      // suppresses the scan's own entry rather than duplicating it.
+      this.store.createOutput({
+        workspaceId: params.workspaceId,
+        outputType: "image",
+        title: path.basename(generated.filePath),
+        status: "completed",
+        filePath: generated.filePath,
+        sessionId,
+        inputId: normalizedString(params.inputId) || null,
+        artifactId: randomUUID(),
+        metadata: {
+          origin_type: "runtime_tool",
+          change_type: "created",
+          category: "image",
+          artifact_type: "image",
+          mime_type: generated.mimeType,
+          size_bytes: generated.sizeBytes,
+          tool_id: "image_generate",
+          model: generated.modelId,
+          ...(generated.providerId ? { provider: generated.providerId } : {}),
+          ...(sessionId ? { source_session_id: sessionId } : {}),
+        },
       });
       return {
         file_path: generated.filePath,
