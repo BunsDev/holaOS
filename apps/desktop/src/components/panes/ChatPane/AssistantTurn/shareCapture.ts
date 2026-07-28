@@ -29,6 +29,9 @@ const SHARE_IMAGE_MIME: Record<string, string> = {
   ".webp": "image/webp",
 };
 export const MAX_SHARE_IMAGES = 4;
+// Mirrors the hub's own per-image limit. Capturing a larger one only moves the
+// rejection downstream, where it lands as a failed upload with no explanation.
+const MAX_SHARE_IMAGE_BYTES = 4 * 1024 * 1024;
 
 const SHARE_VIDEO_MIME: Record<string, string> = {
   ".mp4": "video/mp4",
@@ -79,6 +82,9 @@ export async function gatherShareImages(
     }
     try {
       const bytes = await window.electronAPI.fs.readFileBytes(path, workspaceId);
+      if (bytes.length === 0 || bytes.length > MAX_SHARE_IMAGE_BYTES) {
+        continue;
+      }
       images.push({
         dataBase64: bytesToBase64(bytes),
         contentType: SHARE_IMAGE_MIME[ext],
