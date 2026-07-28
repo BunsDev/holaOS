@@ -237,11 +237,15 @@ export interface ShareDraftItem {
  *  a post taxonomy. */
 export type ShareDraftForm = "conversation" | "output";
 
-/** The inputs that made the Output: the prompt that produced it and the model
+/** The inputs that made the Output: the prompt that produced it and the models
  *  behind it. Its tools travel in `items`. */
 export interface ShareDraftRecipe {
   prompt: string;
+  /** The session model — what Reproduce seeds the new conversation with. */
   model: string;
+  /** The model that produced the artifact (image/video generation). Shown to
+   *  the reader; never seeded as a session model. */
+  outputModel: string;
 }
 
 /** A desktop output the shell staged for sharing. The shell (ChatPane) builds it

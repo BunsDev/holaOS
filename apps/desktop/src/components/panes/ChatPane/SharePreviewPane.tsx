@@ -175,7 +175,11 @@ export function SharePreviewPane() {
     // composer's attach picker next.
     const items = gatherShareAttributionItems(chosenOutputs);
     // What a viewer reproduces from: the ask that produced these artifacts.
-    const recipe = { prompt: resolveRecipePrompt(chosenOutputs, messages), model: "" };
+    const recipe = {
+      prompt: resolveRecipePrompt(chosenOutputs, messages),
+      model: "",
+      outputModel: "",
+    };
     // Hidden context so the composer's "Draft with AI" can caption the artifact
     // from what the assistant said while making it.
     const sourceText = messages
