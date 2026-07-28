@@ -16,6 +16,7 @@ import {
   sidebarCollapsedAtom,
 } from "@/components/layout/shell/state/ui";
 import { Loader2, RefreshCw, X } from "@/components/ui/icons";
+import { cn } from "@/lib/utils";
 import { useStoplightCompensation } from "@/lib/StoplightContext";
 
 interface WebAppSurfacePaneProps {
@@ -213,7 +214,20 @@ export function WebAppSurfacePane({
         // renderer DOM, so without this strip it occludes that expand button when
         // the sidebar is collapsed. Persistent (not collapse-gated) so toggling
         // the sidebar doesn't shift the surface vertically.
-        <div className="window-drag h-9 shrink-0 bg-background" />
+        <div className="window-drag flex h-9 shrink-0 items-center justify-end bg-background pr-3">
+          {/* The header this surface drops carries the only Refresh, and a
+              hosted feed is exactly the thing a user expects to be able to
+              reload. Right-aligned, clear of the stoplight gutter. */}
+          <button
+            aria-label={`Refresh ${title}`}
+            className="window-no-drag grid size-6 place-items-center rounded text-neutral-500 transition-colors hover:bg-neutral-100 hover:text-neutral-800 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+            onClick={handleRefresh}
+            title="Refresh"
+            type="button"
+          >
+            <RefreshCw className={cn("size-4", loading && "animate-spin")} />
+          </button>
+        </div>
       ) : (
         <div
           className="window-drag flex h-9 shrink-0 items-center gap-2 border-neutral-200 border-b pr-3 transition-[padding-left] duration-stride ease-out-expo dark:border-neutral-800"
