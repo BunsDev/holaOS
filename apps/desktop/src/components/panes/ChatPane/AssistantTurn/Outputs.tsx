@@ -50,6 +50,7 @@ import {
   type OutputItem,
 } from "@/lib/outputs";
 import { cn } from "@/lib/utils";
+import { ShareGalleryDialog } from "./ShareGalleryDialog";
 import { useWorkspaceDesktop } from "@/lib/workspaceDesktop";
 import { useAtomValue, useSetAtom } from "jotai";
 import { useState } from "react";
@@ -82,9 +83,7 @@ export function AssistantTurnOutputs({
   const { workspaces, installedApps } = useWorkspaceDesktop();
   const { openUrlInBrowserTab } = useOpenWorkspaceOutput();
   const shareToHolahub = useShareToHolahub();
-  const [selectedShareIds, setSelectedShareIds] = useState<Set<string>>(
-    new Set(),
-  );
+  const [galleryOpen, setGalleryOpen] = useState(false);
   const [sharing, setSharing] = useState(false);
 
   const { cards } = selectTurnResultCards(dedupeOutputsForDisplay(outputs));
@@ -102,7 +101,9 @@ export function AssistantTurnOutputs({
       )
       .map((card) => (card.kind === "output" ? card.output.id : "")),
   );
-  const selectableShare = discoverEnabled && shareableOutputIds.size >= 2;
+  // Two or more artifacts is a choice, and a choice between pictures belongs in
+  // a gallery rather than a column of filenames with checkboxes.
+  const pickable = discoverEnabled && shareableOutputIds.size >= 2;
 
   // "Share to win credits": the credits a live campaign grants for sharing an
   // output, or null when none is running (nudge falls back to plain encourage).
@@ -123,15 +124,40 @@ export function AssistantTurnOutputs({
   // A post holds MAX_SHARE_IMAGES artifacts. Past that the nudge stops being a
   // one-click action and becomes the start of a choice — picking the first few
   // on the user's behalf is not ours to do when they can see all of them.
-  const overCap = shareableCards.length > MAX_SHARE_IMAGES;
-  const shareAllLabel = overCap
-    ? `Pick ${MAX_SHARE_IMAGES} of ${shareableCards.length} to share`
-    : shareableCards.length > 1
-      ? `Share ${shareableCards.length} to HolaHub`
+  const shareAllLabel =
+    shareableCards.length > 1
+      ? `Choose from ${shareableCards.length} to share`
       : "Share to HolaHub";
 
-  // Quick-share every shareable output in the turn (the nudge's action; the
-  // per-item checkboxes still let the user post a subset).
+  const shareChosen = (chosen: WorkspaceOutputRecordPayload[]) => {
+    if (chosen.length === 0 || sharing) {
+      return;
+    }
+    setSharing(true);
+    Promise.all([
+      gatherShareImages(chosen, workspaceId ?? null),
+      gatherShareVideos(chosen, workspaceId ?? null),
+    ])
+      .then(([images, videos]) => {
+        shareToHolahub({
+          sourceText: turnText,
+          images,
+          videos,
+          items: gatherShareAttributionItems(chosen),
+          form: "output",
+          recipe: {
+            prompt: "",
+            model: "",
+            outputModel: resolveOutputModel(chosen),
+          },
+        });
+        setGalleryOpen(false);
+      })
+      .finally(() => setSharing(false));
+  };
+
+  // Quick-share the turn's single artifact (the nudge's action when there is
+  // nothing to choose between).
   const shareAll = () => {
     if (shareableCards.length === 0 || sharing) {
       return;
@@ -156,51 +182,6 @@ export function AssistantTurnOutputs({
             outputModel: resolveOutputModel(shareableCards),
           },
         });
-      })
-      .finally(() => setSharing(false));
-  };
-
-  const toggleShareSelect = (id: string) => {
-    setSelectedShareIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-      } else if (next.size < MAX_SHARE_IMAGES) {
-        next.add(id);
-      }
-      return next;
-    });
-  };
-
-  const shareSelected = () => {
-    if (selectedShareIds.size === 0 || sharing) {
-      return;
-    }
-    const chosen = cards
-      .filter(
-        (card) =>
-          card.kind === "output" && selectedShareIds.has(card.output.id),
-      )
-      .map((card) => (card as { output: WorkspaceOutputRecordPayload }).output);
-    setSharing(true);
-    Promise.all([
-      gatherShareImages(chosen, workspaceId ?? null),
-      gatherShareVideos(chosen, workspaceId ?? null),
-    ])
-      .then(([images, videos]) => {
-        shareToHolahub({
-          sourceText: turnText,
-          images,
-          videos,
-          items: gatherShareAttributionItems(chosen),
-          form: "output",
-          recipe: {
-            prompt: "",
-            model: "",
-            outputModel: resolveOutputModel(chosen),
-          },
-        });
-        setSelectedShareIds(new Set());
       })
       .finally(() => setSharing(false));
   };
@@ -280,12 +261,9 @@ export function AssistantTurnOutputs({
             key={card.output.id}
             defaultTitle={labelByOutputId.get(card.output.id)}
             output={card.output}
-            selectable={selectableShare && shareableOutputIds.has(card.output.id)}
-            selected={selectedShareIds.has(card.output.id)}
             workspaceId={workspaceId ?? null}
             onOpen={onOpenOutput}
             onRefine={() => refine(card.output)}
-            onToggleSelect={() => toggleShareSelect(card.output.id)}
           />
         ),
       )}
@@ -312,41 +290,12 @@ export function AssistantTurnOutputs({
         </button>
       ) : null}
 
-      {selectableShare && selectedShareIds.size > 0 ? (
-        <button
-          className="mt-1 flex h-9 items-center justify-center gap-2 rounded-lg bg-primary px-3 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-60"
-          disabled={sharing}
-          onClick={shareSelected}
-          type="button"
-        >
-          {sharing ? (
-            <Loader2 className="size-4 animate-spin" />
-          ) : (
-            <Upload className="size-4" strokeWidth={1.9} />
-          )}
-          Share {selectedShareIds.size} to HolaHub
-          {shareCredits == null ? "" : ` · win ${shareCredits} credits`}
-          {selectedShareIds.size >= MAX_SHARE_IMAGES && overCap
-            ? " · max"
-            : ""}
-        </button>
-      ) : discoverEnabled && shareableOutputIds.size >= 1 ? (
+      {discoverEnabled && shareableOutputIds.size >= 1 ? (
         shareCredits == null ? (
           <button
             className="group mt-1 flex h-8 items-center gap-2 self-start rounded-md px-2.5 text-left text-primary text-xs transition-colors hover:bg-primary/10 disabled:opacity-60"
             disabled={sharing}
-            onClick={
-              overCap
-                ? () =>
-                    setSelectedShareIds(
-                      new Set(
-                        shareableCards
-                          .slice(0, MAX_SHARE_IMAGES)
-                          .map((output) => output.id)
-                      )
-                    )
-                : shareAll
-            }
+            onClick={pickable ? () => setGalleryOpen(true) : shareAll}
             type="button"
           >
             {sharing ? (
@@ -361,7 +310,7 @@ export function AssistantTurnOutputs({
           <button
             className="group mt-1 flex w-full items-center gap-3 rounded-xl bg-primary px-3.5 py-2.5 text-left text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 disabled:opacity-60"
             disabled={sharing}
-            onClick={shareAll}
+            onClick={pickable ? () => setGalleryOpen(true) : shareAll}
             type="button"
           >
             <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-white/15">
@@ -383,6 +332,15 @@ export function AssistantTurnOutputs({
           </button>
         )
       ) : null}
+
+      <ShareGalleryDialog
+        onConfirm={shareChosen}
+        onOpenChange={setGalleryOpen}
+        open={galleryOpen}
+        outputs={shareableCards}
+        sharing={sharing}
+        workspaceId={workspaceId ?? null}
+      />
     </div>
   );
 }
@@ -396,21 +354,15 @@ function fileExtensionUpper(filePath: string): string {
 function ResultOutputRow({
   defaultTitle,
   output,
-  selectable,
-  selected,
   workspaceId,
   onOpen,
   onRefine,
-  onToggleSelect,
 }: {
   defaultTitle: string | undefined;
   output: WorkspaceOutputRecordPayload;
-  selectable: boolean;
-  selected: boolean;
   workspaceId: string | null;
   onOpen?: (output: WorkspaceOutputRecordPayload) => void;
   onRefine: () => void;
-  onToggleSelect: () => void;
 }) {
   const deliverableKind = outputDeliverableKind(output as OutputItem);
   const filePath = output.file_path ?? null;
@@ -452,40 +404,9 @@ function ResultOutputRow({
   return (
     <div
       className={cn(
-        "group flex w-full min-w-0 items-center gap-3 rounded-xl border px-3.5 py-2.5 transition-colors",
-        selected
-          ? "border-primary/50 bg-primary/[0.06]"
-          : "border-border/70 bg-foreground/[0.02] hover:bg-foreground/[0.05]",
+        "group flex w-full min-w-0 items-center gap-3 rounded-xl border border-border/70 bg-foreground/[0.02] px-3.5 py-2.5 transition-colors hover:bg-foreground/[0.05]"
       )}
     >
-      {selectable ? (
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <button
-                aria-checked={selected}
-                aria-label={
-                  selected ? "Deselect from share" : "Select to share"
-                }
-                className={cn(
-                  "grid size-5 shrink-0 place-items-center rounded-md border transition-colors",
-                  selected
-                    ? "border-primary bg-primary text-primary-foreground"
-                    : "border-border text-transparent hover:border-primary/60",
-                )}
-                onClick={onToggleSelect}
-                role="checkbox"
-                type="button"
-              />
-            }
-          >
-            <Check className="size-3.5" strokeWidth={2.5} />
-          </TooltipTrigger>
-          <TooltipContent side="bottom" className="py-1">
-            Select to share
-          </TooltipContent>
-        </Tooltip>
-      ) : null}
       <button
         className="flex min-w-0 flex-1 items-center gap-3 text-left disabled:cursor-default"
         disabled={!onOpen}
