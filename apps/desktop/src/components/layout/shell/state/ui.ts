@@ -325,6 +325,13 @@ export interface ShareSessionPayload {
   workspaceId: string | null;
   /** Friendly name of the session's active model (e.g. "Claude Opus 4.8"). */
   model: string;
+  /** The same model as a resolvable id (e.g. "anthropic/claude-sonnet-4-6") —
+   *  what a Recipe stores, since the display name cannot be selected again. */
+  modelId: string;
+  /** skill id → title, and integration slug → name, so a share can name the
+   *  tools it detects without reaching back into the composer's state. */
+  skillNames: Record<string, string>;
+  integrationNames: Record<string, string>;
   // Render context so the preview renders turns exactly as the live chat does
   // (reusing the real UserTurn/AssistantTurn components).
   label: string;
@@ -333,6 +340,15 @@ export interface ShareSessionPayload {
   showExecutionInternals: boolean;
 }
 export const shareSessionPayloadAtom = atom<ShareSessionPayload | null>(null);
+
+/** A host hand-off asking the chat to open on a particular model (Reproduce
+ *  carrying the model its Output was made on). Consumed by ChatPane, which
+ *  ignores a model this install does not have. */
+export interface ChatModelRequest {
+  model: string;
+  requestKey: number;
+}
+export const chatModelRequestAtom = atom<ChatModelRequest | null>(null);
 
 /** How the "Share to HolaHub" composer opens: the whole conversation (a
  *  transcript "session" post) or just the produced artifacts (a media "post"). */

@@ -33,6 +33,7 @@ import {
   CHAT_PANEL_MIN_WIDTH,
   chatAppContextAttachmentRequestAtom,
   chatComposerPrefillAtom,
+  chatModelRequestAtom,
   chatExplorerAttachmentRequestAtom,
   chatLocalAttachmentRequestAtom,
   chatPanelHiddenAtom,
@@ -83,6 +84,8 @@ export function ChatPanel({ layout = "split" }: { layout?: ChatLayout }) {
   );
   const sessionRequestKeyRef = useRef(0);
   const composerPrefill = useAtomValue(chatComposerPrefillAtom);
+  const chatModelRequest = useAtomValue(chatModelRequestAtom);
+  const setChatModelRequest = useSetAtom(chatModelRequestAtom);
   const setComposerPrefill = useSetAtom(chatComposerPrefillAtom);
 
   // Reset to chat whenever the workspace changes — the sessions list is
@@ -120,6 +123,10 @@ export function ChatPanel({ layout = "split" }: { layout?: ChatLayout }) {
     }
     setView("chat");
   }, [composerPrefill, setSessionOpenRequest, setView]);
+
+  const handleChatModelRequestConsumed = useCallback(() => {
+    setChatModelRequest(null);
+  }, [setChatModelRequest]);
 
   const handleReturnToChat = useCallback(() => {
     setView("chat");
@@ -486,7 +493,9 @@ export function ChatPanel({ layout = "split" }: { layout?: ChatLayout }) {
         onActiveSessionIdChange={setSelectedSessionId}
         sessionOpenRequest={sessionOpenRequest}
         onSessionOpenRequestConsumed={handleSessionOpenRequestConsumed}
+        chatModelRequest={chatModelRequest}
         composerPrefillRequest={composerPrefill}
+        onChatModelRequestConsumed={handleChatModelRequestConsumed}
         onComposerPrefillConsumed={handleComposerPrefillConsumed}
         localAttachmentRequest={localAttachmentRequest}
         onLocalAttachmentRequestConsumed={handleLocalAttachmentRequestConsumed}

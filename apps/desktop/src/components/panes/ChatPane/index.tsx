@@ -56,6 +56,7 @@ import {
   Waypoints,
   X,
 } from "@/components/ui/icons";
+import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { DotmSquare3 } from "@/components/ui/dotm-square-3";
@@ -3456,6 +3457,8 @@ interface ChatPaneProps {
   onSessionOpenRequestConsumed?: (requestKey: number) => void;
   composerPrefillRequest?: ChatPaneComposerPrefillRequest | null;
   onComposerPrefillConsumed?: (requestKey: number) => void;
+  chatModelRequest?: { model: string; requestKey: number } | null;
+  onChatModelRequestConsumed?: (requestKey: number) => void;
   localAttachmentRequest?: ChatPaneLocalAttachmentRequest | null;
   onLocalAttachmentRequestConsumed?: (requestKey: number) => void;
   explorerAttachmentRequest?: ChatPaneExplorerAttachmentRequest | null;
@@ -3504,6 +3507,8 @@ export function ChatPane({
   onSessionOpenRequestConsumed,
   composerPrefillRequest = null,
   onComposerPrefillConsumed,
+  chatModelRequest = null,
+  onChatModelRequestConsumed,
   localAttachmentRequest = null,
   onLocalAttachmentRequestConsumed,
   explorerAttachmentRequest = null,
@@ -9587,6 +9592,36 @@ export function ChatPane({
     },
     [activeSessionId, hasMessages],
   );
+  // A host hand-off (Reproduce) asking to open on the model the shared Output was
+  // made with. Applied through the same path as the composer's own picker, and
+  // ignored when this install has no such model — never block the hand-off.
+  const lastModelRequestKeyRef = useRef(0);
+  useEffect(() => {
+    if (!chatModelRequest || chatModelRequest.requestKey === lastModelRequestKeyRef.current) {
+      return;
+    }
+    lastModelRequestKeyRef.current = chatModelRequest.requestKey;
+    const wanted = chatModelRequest.model.trim();
+    if (!wanted) {
+      onChatModelRequestConsumed?.(chatModelRequest.requestKey);
+      return;
+    }
+    if (availableChatModelOptions.some((o) => o.value === wanted)) {
+      applyComposerModelSelection(wanted);
+    } else {
+      // Falling back silently would let someone believe they reproduced
+      // something on the model it was made with.
+      toast.info(`Original used ${displayModelLabel(wanted)}`, {
+        description: "You don't have that model — using your default instead.",
+      });
+    }
+    onChatModelRequestConsumed?.(chatModelRequest.requestKey);
+  }, [
+    chatModelRequest,
+    availableChatModelOptions,
+    applyComposerModelSelection,
+    onChatModelRequestConsumed,
+  ]);
   const handleSwitchModelFromError = useCallback(
     (modelToken: string) => {
       applyComposerModelSelection(modelToken);
@@ -9861,6 +9896,18 @@ export function ChatPane({
               messages: displayMessages,
               workspaceId: (selectedWorkspaceId || "").trim() || null,
               model: selectedModelDisplayLabel,
+              modelId: resolvedChatModel,
+              skillNames: Object.fromEntries(
+                [...availableWorkspaceSkillMap.entries()].map(([id, skill]) => [
+                  id,
+                  skill?.title ?? id,
+                ]),
+              ),
+              integrationNames: Object.fromEntries(
+                Object.entries(composioToolkitsByProvider).map(
+                  ([slug, toolkit]) => [slug, toolkit?.name ?? slug],
+                ),
+              ),
               label: assistantLabel,
               mode: assistantMode,
               harnessId: activeSessionRecord?.harness_id ?? "pi",

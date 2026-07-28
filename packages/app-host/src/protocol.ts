@@ -104,6 +104,14 @@ export interface ChatStartInput {
   /** Skills to quote in the composer as skill chips (their ids == workspace
    *  skill_id). Rendered as `/skill` chips, not generic context pills. */
   skillIds?: string[];
+  /** Open the session on this model (a resolvable id, not a display name). A
+   *  model the viewer does not have falls back to their default rather than
+   *  failing the hand-off — a Reproduce should never be blocked by it. */
+  model?: string;
+  /** Files to stage on the composer as pending attachments — a Reproduce sends
+   *  the shared Output here so the viewer works "from something like this".
+   *  They land as ordinary attachments, so removing one is just removing it. */
+  attachments?: ChatStartAttachment[];
   /** Create a fresh session (default true). */
   newSession?: boolean;
   /** Auto-send instead of leaving an editable draft (default false). */
@@ -114,6 +122,14 @@ export interface ChatStartInput {
    *  the calling HolaApp. Used by system surfaces like HolaHub whose hand-off
    *  belongs in General, not under an app row (default false → app-bounded). */
   general?: boolean;
+}
+
+/** Base64 because the bridge is IPC, not a network the renderer can reach —
+ *  the same transport a ShareDraft's images already use. */
+export interface ChatStartAttachment {
+  fileName: string;
+  contentType: string;
+  dataBase64: string;
 }
 
 export interface ChatStartResult {
@@ -221,18 +237,38 @@ export interface OpenAppEventPayload {
 
 // ── op: holahub.consume-pending-share ─────────────────────────────────────
 
-/** One auto-attributed tool the shared output was made with — a catalog ref the
- *  HolaHub composer pre-attaches as a post item. */
+/** One tool the shared output was made with — a catalog ref the HolaHub composer
+ *  pre-attaches as a post item. `derived` was detected from what the sharer
+ *  explicitly invoked and is not theirs to remove; `attached` is a plain
+ *  recommendation they can drop. */
 export interface ShareDraftItem {
-  type: "skill" | "mcp" | "holaapp" | "capability";
+  type: "skill" | "mcp" | "holaapp" | "capability" | "integration";
   ref: string;
   name: string;
+  origin: "derived" | "attached";
+}
+
+/** How the sharer chose to share — mirrors the ChatPane share mode. It settles
+ *  which is the hero when a draft carries both a transcript and media; it is not
+ *  a post taxonomy. */
+export type ShareDraftForm = "conversation" | "output";
+
+/** The inputs that made the Output: the prompt that produced it and the models
+ *  behind it. Its tools travel in `items`. */
+export interface ShareDraftRecipe {
+  prompt: string;
+  /** The session model — what Reproduce seeds the new conversation with. */
+  model: string;
+  /** The model that produced the artifact (image/video generation). Shown to
+   *  the reader; never seeded as a session model. */
+  outputModel: string;
 }
 
 /** A desktop output the shell staged for sharing. The shell (ChatPane) builds it
  *  and stages it via a trusted shell→main IPC; the HolaHub web surface pulls it
  *  once on its compose route via `holahub.consume-pending-share`, then prefills
- *  its composer. Everything here is user-editable in the composer. */
+ *  its composer. The sharer edits everything here except a `derived` item, which
+ *  they may demote but not delete. */
 export interface ShareDraftImage {
   /** base64 (no data: prefix) of the generated image file. */
   dataBase64: string;
@@ -285,8 +321,12 @@ export interface ShareDraft {
   /** Generated video(s) captured from the turn — same base64+upload path as
    *  images (size-capped upstream to keep IPC sane). */
   videos: ShareDraftImage[];
-  /** Session tools resolved to catalog refs — the auto-attribution. */
+  /** Session tools resolved to catalog refs, each carrying its origin. */
   items: ShareDraftItem[];
+  /** Which share mode produced this draft; absent = a tool-only share. */
+  form?: ShareDraftForm;
+  /** The prompt + model that made the Output, for Reproduce. */
+  recipe?: ShareDraftRecipe;
   /** Provenance for analytics (e.g. "desktop_chat"). */
   source: string;
   /** When present, this is a whole-conversation share → a "session" post. */

@@ -16,7 +16,10 @@ import { cn } from "@/lib/utils";
 import { AssistantTurn } from "./AssistantTurn";
 import {
   gatherSessionSnapshot,
+  gatherQuotedToolItems,
   gatherShareAttributionItems,
+  resolveOutputModel,
+  resolveRecipePrompt,
   gatherShareFiles,
   gatherShareImages,
   gatherShareVideos,
@@ -94,6 +97,13 @@ export function SharePreviewPane() {
   const [collapsedTrace, setCollapsedTrace] = useState<Record<string, boolean>>(
     {}
   );
+  const toolNames = useMemo(
+    () => ({
+      skills: payload?.skillNames ?? {},
+      integrations: payload?.integrationNames ?? {},
+    }),
+    [payload]
+  );
   const [includeModel, setIncludeModel] = useState(true);
   const [caption, setCaption] = useState("");
   const [posting, setPosting] = useState(false);
@@ -147,10 +157,18 @@ export function SharePreviewPane() {
     }
     // Credit the apps that actually produced this conversation's outputs, so a
     // shared session shows "Made with <App>" (not just skills).
-    const items = gatherShareAttributionItems(
-      selectedTurns.flatMap((t) => (t.outputs ?? []) as ShareableOutput[])
-    );
-    await shareToHolahub({ body: caption, items, session: snapshot });
+    const items = [
+      ...gatherQuotedToolItems(selectedTurns, toolNames),
+      ...gatherShareAttributionItems(
+        selectedTurns.flatMap((t) => (t.outputs ?? []) as ShareableOutput[])
+      ),
+    ];
+    await shareToHolahub({
+      body: caption,
+      items,
+      form: "conversation",
+      session: snapshot,
+    });
   };
 
   const postOutputs = async () => {
@@ -167,7 +185,20 @@ export function SharePreviewPane() {
     }
     // Seed the apps that made these outputs; the user adds any skills/MCPs in the
     // composer's attach picker next.
-    const items = gatherShareAttributionItems(chosenOutputs);
+    const sourceInputIds = new Set(
+      chosenOutputs.map((o) => o.input_id).filter(Boolean)
+    );
+    const sourceTurns = messages.filter((m) => sourceInputIds.has(m.id));
+    const items = [
+      ...gatherQuotedToolItems(sourceTurns, toolNames),
+      ...gatherShareAttributionItems(chosenOutputs),
+    ];
+    // What a viewer reproduces from: the ask that produced these artifacts.
+    const recipe = {
+      prompt: resolveRecipePrompt(chosenOutputs, messages),
+      model: payload.modelId ?? "",
+      outputModel: resolveOutputModel(chosenOutputs),
+    };
     // Hidden context so the composer's "Draft with AI" can caption the artifact
     // from what the assistant said while making it.
     const sourceText = messages
@@ -190,11 +221,21 @@ export function SharePreviewPane() {
         body: caption,
         sourceText,
         items,
+        form: "output",
+        recipe,
         session: { turns: [turn] },
       });
       return;
     }
-    await shareToHolahub({ body: caption, sourceText, images, videos, items });
+    await shareToHolahub({
+      body: caption,
+      sourceText,
+      images,
+      videos,
+      items,
+      form: "output",
+      recipe,
+    });
   };
 
   const post = async () => {
