@@ -14,11 +14,41 @@
 
 import {
   BRIDGE_VERSION,
+  HOST_COLOR_SCHEME_CHANGED,
   HOST_GLOBAL_KEY,
   HOST_IPC,
+  type HostColorScheme,
   type HostOp,
 } from "@holaboss/app-host/protocol";
 import { contextBridge, ipcRenderer } from "electron";
+
+// The desktop's light/dark scheme, mirrored to the hosted page so a surface
+// doesn't sit in the app as a differently-themed website. Read synchronously at
+// preload time (before any page script), so the page's boot script can set its
+// theme class in the same tick and never paint a wrong-theme frame.
+function readColorScheme(): HostColorScheme {
+  try {
+    return ipcRenderer.sendSync(HOST_IPC.colorScheme) === "dark"
+      ? "dark"
+      : "light";
+  } catch {
+    return "light";
+  }
+}
+
+let colorScheme = readColorScheme();
+const colorSchemeListeners = new Set<(scheme: HostColorScheme) => void>();
+
+ipcRenderer.on(HOST_COLOR_SCHEME_CHANGED, (_event, next: unknown) => {
+  colorScheme = next === "dark" ? "dark" : "light";
+  for (const listener of colorSchemeListeners) {
+    try {
+      listener(colorScheme);
+    } catch {
+      // A hosted page's listener must never break the others.
+    }
+  }
+});
 
 contextBridge.exposeInMainWorld(HOST_GLOBAL_KEY, {
   version: BRIDGE_VERSION,
@@ -26,6 +56,10 @@ contextBridge.exposeInMainWorld(HOST_GLOBAL_KEY, {
     ipcRenderer.invoke(HOST_IPC.capabilities),
   invoke: (op: string, payload: unknown): Promise<unknown> =>
     ipcRenderer.invoke(HOST_IPC.invoke, { op, payload }),
+  colorScheme: (): HostColorScheme => colorScheme,
+  onColorSchemeChange: (listener: (scheme: HostColorScheme) => void): void => {
+    colorSchemeListeners.add(listener);
+  },
 });
 
 // Tell main the moment this page first paints content, so the surface is revealed

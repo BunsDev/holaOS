@@ -31,7 +31,7 @@ const SHARE_IMAGE_MIME: Record<string, string> = {
 export const MAX_SHARE_IMAGES = 4;
 // Mirrors the hub's own per-image limit. Capturing a larger one only moves the
 // rejection downstream, where it lands as a failed upload with no explanation.
-const MAX_SHARE_IMAGE_BYTES = 4 * 1024 * 1024;
+const MAX_SHARE_IMAGE_BYTES = 10 * 1024 * 1024;
 
 const SHARE_VIDEO_MIME: Record<string, string> = {
   ".mp4": "video/mp4",
