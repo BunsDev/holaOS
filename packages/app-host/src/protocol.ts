@@ -108,6 +108,10 @@ export interface ChatStartInput {
    *  model the viewer does not have falls back to their default rather than
    *  failing the hand-off — a Reproduce should never be blocked by it. */
   model?: string;
+  /** Files to stage on the composer as pending attachments — a Reproduce sends
+   *  the shared Output here so the viewer works "from something like this".
+   *  They land as ordinary attachments, so removing one is just removing it. */
+  attachments?: ChatStartAttachment[];
   /** Create a fresh session (default true). */
   newSession?: boolean;
   /** Auto-send instead of leaving an editable draft (default false). */
@@ -118,6 +122,14 @@ export interface ChatStartInput {
    *  the calling HolaApp. Used by system surfaces like HolaHub whose hand-off
    *  belongs in General, not under an app row (default false → app-bounded). */
   general?: boolean;
+}
+
+/** Base64 because the bridge is IPC, not a network the renderer can reach —
+ *  the same transport a ShareDraft's images already use. */
+export interface ChatStartAttachment {
+  fileName: string;
+  contentType: string;
+  dataBase64: string;
 }
 
 export interface ChatStartResult {

@@ -1,8 +1,12 @@
-import type { AppContext } from "@holaboss/app-host/protocol";
+import type {
+  AppContext,
+  ChatStartAttachment,
+} from "@holaboss/app-host/protocol";
 import { useSetAtom } from "jotai";
 import { useEffect, useRef } from "react";
 import {
   chatAppContextAttachmentRequestAtom,
+  chatLocalAttachmentRequestAtom,
   chatModelRequestAtom,
   chatComposerPrefillAtom,
   chatPanelViewAtom,
@@ -58,6 +62,28 @@ function appContextToText(ctx: AppContext): string {
  * split layout shows the app + the new chat side by side), so "Discuss" lands
  * in context. Mount once at the shell root.
  */
+/** base64 → File, so a hand-off attachment joins the same pending-attachment
+ *  path a dropped file uses. Null on anything malformed — a bad reference should
+ *  cost the attachment, not the hand-off. */
+function decodeChatStartAttachment(input: unknown): File | null {
+  const a = input as Partial<ChatStartAttachment> | null;
+  if (!(a?.dataBase64 && a.contentType)) {
+    return null;
+  }
+  try {
+    const binary = atob(a.dataBase64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    return new File([bytes], a.fileName?.trim() || "reference", {
+      type: a.contentType,
+    });
+  } catch {
+    return null;
+  }
+}
+
 export function useHostOpenChat(): void {
   const setSelectedSessionId = useSetAtom(selectedSessionIdAtom);
   const setSessionOpenRequest = useSetAtom(chatSessionOpenRequestAtom);
@@ -71,6 +97,7 @@ export function useHostOpenChat(): void {
     chatAppContextAttachmentRequestAtom,
   );
   const setChatModelRequest = useSetAtom(chatModelRequestAtom);
+  const setLocalAttachmentRequest = useSetAtom(chatLocalAttachmentRequestAtom);
   const seqRef = useRef(0);
 
   useEffect(() => {
@@ -103,6 +130,20 @@ export function useHostOpenChat(): void {
           model: requestedModel,
           requestKey: seqRef.current,
         });
+      }
+
+      // A reference Output rides in as base64 and lands as an ordinary pending
+      // attachment, so the composer's own image-support check and remove button
+      // both apply without knowing where it came from.
+      const attachments = Array.isArray(payload.input?.attachments)
+        ? payload.input.attachments
+        : [];
+      const files = attachments
+        .map((a) => decodeChatStartAttachment(a))
+        .filter((f): f is File => f !== null);
+      if (files.length > 0) {
+        seqRef.current += 1;
+        setLocalAttachmentRequest({ files, requestKey: seqRef.current });
       }
 
       const prompt =
@@ -156,6 +197,7 @@ export function useHostOpenChat(): void {
     setFocusMode,
     setProjectView,
     setChatModelRequest,
+    setLocalAttachmentRequest,
     setWorkspaceOverlay,
     setAppContextAttachmentRequest,
   ]);
