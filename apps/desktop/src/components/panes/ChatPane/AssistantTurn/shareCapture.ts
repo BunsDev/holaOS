@@ -310,6 +310,7 @@ export function gatherShareAttributionItems(
       type: "holaapp",
       ref: moduleId,
       name: toolkitDisplayName(moduleId),
+      origin: "derived",
     });
   }
   return items;
