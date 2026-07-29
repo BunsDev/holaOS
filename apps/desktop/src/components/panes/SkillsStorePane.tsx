@@ -143,29 +143,30 @@ export function SkillsStorePane({
   const orgSkills = orgQuery.data ?? [];
 
   const entries = marketQuery.data?.skills ?? [];
-  const installedCount = installedIds.size;
-  // Installed preview — the first few installed skills shown inline, with a
-  // "See … N more" link into the full Installed view (replacing a persistent
-  // Store/Installed toggle). Sourced from the market entries so each carries a
-  // name + description + glyph.
-  const INSTALLED_PREVIEW = 6;
-  const installedEntries = useMemo(
-    () => entries.filter((entry) => installedIds.has(entry.id)),
-    [entries, installedIds],
+  // Every installed skill, in full. Sourcing this from the market catalog only
+  // ever showed the handful that came from there — most of a workspace's skills
+  // are imported from GitHub or written by the agent, so a workspace with 19
+  // showed 2 and hid the rest behind "See all". The workspace record carries a
+  // title and summary, which is what a row needs; a market entry, where one
+  // exists, adds the curated glyph and category.
+  const marketIds = useMemo(
+    () => new Set(entries.map((entry) => entry.id)),
+    [entries],
   );
-  const installedPreview = installedEntries.slice(0, INSTALLED_PREVIEW);
-  const hiddenInstalledCount = installedCount - installedPreview.length;
-  const namedHidden = installedEntries
-    .slice(INSTALLED_PREVIEW, INSTALLED_PREVIEW + 2)
-    .map((entry) => entry.name);
-  const seeMoreLabel =
-    namedHidden.length > 0
-      ? `See ${namedHidden.join(", ")}${
-          hiddenInstalledCount - namedHidden.length > 0
-            ? `, and ${hiddenInstalledCount - namedHidden.length} more`
-            : ""
-        }`
-      : `See all ${installedCount} installed`;
+  const installedEntries: DirectorySkillDto[] = useMemo(() => {
+    const marketById = new Map(entries.map((entry) => [entry.id, entry]));
+    return (installedQuery.data?.skills ?? []).map((skill) => {
+      const market = marketById.get(skill.skill_id);
+      if (market) {
+        return market;
+      }
+      return {
+        id: skill.skill_id,
+        name: skill.title || skill.skill_id,
+        description: skill.summary,
+      };
+    });
+  }, [entries, installedQuery.data]);
   const normalized = query.trim().toLowerCase();
   const filteredOrg = useMemo(
     () =>
@@ -404,7 +405,7 @@ export function SkillsStorePane({
               </div>
             ) : (
               <div className="mx-auto flex w-full max-w-5xl flex-col gap-5 px-6">
-            {manageOnly || installedPreview.length > 0 ? (
+            {manageOnly || installedEntries.length > 0 ? (
               <section className="flex flex-col gap-2.5">
                 <div className="flex items-center justify-between gap-3">
                   <h3 className="font-medium text-foreground text-sm">
@@ -418,31 +419,27 @@ export function SkillsStorePane({
                     />
                   ) : null}
                 </div>
-                {installedPreview.length > 0 ? (
-                  <>
-                    <div className="grid grid-cols-1 gap-x-4 gap-y-2 sm:grid-cols-2">
-                      {installedPreview.map((entry) => (
-                        <SkillRow
-                          compact
-                          entry={entry}
-                          installed
-                          key={entry.id}
-                          onAdd={() => addSkill(entry)}
-                          onOpen={() => setDetailId(entry.id)}
-                          pending={pendingId === entry.id}
-                        />
-                      ))}
-                    </div>
-                    {hiddenInstalledCount > 0 ? (
-                      <button
-                        className="self-start text-muted-foreground text-sm transition-colors hover:text-foreground"
-                        onClick={() => setView("installed")}
-                        type="button"
-                      >
-                        {seeMoreLabel}
-                      </button>
-                    ) : null}
-                  </>
+                {installedEntries.length > 0 ? (
+                  <div className="grid grid-cols-1 gap-x-4 gap-y-2 sm:grid-cols-2">
+                    {installedEntries.map((entry) => (
+                      <SkillRow
+                        compact
+                        entry={entry}
+                        installed
+                        key={entry.id}
+                        onAdd={() => addSkill(entry)}
+                        // The store's detail reads the directory, which has
+                        // nothing to say about a locally authored or imported
+                        // skill — those open in the manager, which reads disk.
+                        onOpen={() =>
+                          marketIds.has(entry.id)
+                            ? setDetailId(entry.id)
+                            : setView("installed")
+                        }
+                        pending={pendingId === entry.id}
+                      />
+                    ))}
+                  </div>
                 ) : (
                   <EmptyState
                     action={

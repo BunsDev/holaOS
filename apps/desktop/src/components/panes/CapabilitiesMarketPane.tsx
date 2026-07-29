@@ -379,24 +379,12 @@ export function CapabilitiesMarketPane({
   // Installed preview — the first few installed capabilities inline, with a
   // "See … N more" link into the full Installed view (via onManage), replacing
   // a persistent Store/Installed toggle.
-  const INSTALLED_PREVIEW = 6;
+
+  // Every installed combo, not a capped preview — this is the manage surface.
   const installedItems = useMemo(
     () => items.filter((item) => installedIds.has(item.id)),
     [items, installedIds],
   );
-  const installedPreview = installedItems.slice(0, INSTALLED_PREVIEW);
-  const hiddenInstalledCount = installedCount - installedPreview.length;
-  const namedHidden = installedItems
-    .slice(INSTALLED_PREVIEW, INSTALLED_PREVIEW + 2)
-    .map((item) => item.name);
-  const seeMoreLabel =
-    namedHidden.length > 0
-      ? `See ${namedHidden.join(", ")}${
-          hiddenInstalledCount - namedHidden.length > 0
-            ? `, and ${hiddenInstalledCount - namedHidden.length} more`
-            : ""
-        }`
-      : `See all ${installedCount} installed`;
 
   const isLoading = centralQuery.isLoading;
 
@@ -613,7 +601,7 @@ export function CapabilitiesMarketPane({
               </div>
             ) : (
               <div className="mx-auto flex w-full max-w-5xl flex-col gap-5 px-6">
-            {manageOnly || installedPreview.length > 0 ? (
+            {manageOnly || installedItems.length > 0 ? (
               <section className="flex flex-col gap-2.5">
                 <div className="flex items-center justify-between gap-3">
                   <h3 className="font-medium text-foreground text-sm">
@@ -632,10 +620,9 @@ export function CapabilitiesMarketPane({
                     </Button>
                   ) : null}
                 </div>
-                {installedPreview.length > 0 ? (
-                  <>
-                    <div className="grid grid-cols-1 gap-x-4 gap-y-2 sm:grid-cols-2">
-                      {installedPreview.map((item) => (
+                {installedItems.length > 0 ? (
+                  <div className="grid grid-cols-1 gap-x-4 gap-y-2 sm:grid-cols-2">
+                    {installedItems.map((item) => (
                         <CapabilityCard
                           compact
                           installed
@@ -650,17 +637,7 @@ export function CapabilitiesMarketPane({
                           pending={pendingId === item.id}
                         />
                       ))}
-                    </div>
-                    {hiddenInstalledCount > 0 ? (
-                      <button
-                        className="self-start text-muted-foreground text-sm transition-colors hover:text-foreground"
-                        onClick={onManage}
-                        type="button"
-                      >
-                        {seeMoreLabel}
-                      </button>
-                    ) : null}
-                  </>
+                  </div>
                 ) : (
                   <EmptyState
                     action={

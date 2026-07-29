@@ -127,7 +127,8 @@ function McpsBrowse({
 
   // Preview the servers connected to this workspace (catalog-named when known,
   // else the raw server id), with a "See all" link into the full connected view.
-  const INSTALLED_PREVIEW = 6;
+  // Every connected server, listed in full — this is the manage surface, so a
+  // capped preview only meant a trip to a second screen to see the rest.
   const catalogById = new Map(
     catalog.map((entry) => [entry.id, entry] as const)
   );
@@ -136,19 +137,6 @@ function McpsBrowse({
     name: catalogById.get(server.id)?.name ?? server.id,
     entry: catalogById.get(server.id) ?? null,
   }));
-  const installedPreview = connectedItems.slice(0, INSTALLED_PREVIEW);
-  const namedHidden = connectedItems
-    .slice(INSTALLED_PREVIEW, INSTALLED_PREVIEW + 2)
-    .map((item) => item.name);
-  const hiddenCount = connectedItems.length - installedPreview.length;
-  const seeMoreLabel =
-    namedHidden.length > 0
-      ? `See ${namedHidden.join(", ")}${
-          hiddenCount - namedHidden.length > 0
-            ? `, and ${hiddenCount - namedHidden.length} more`
-            : ""
-        }`
-      : `See all ${connectedItems.length} connected`;
 
   const removeConnected = async (item: {
     id: string;
@@ -251,11 +239,11 @@ function McpsBrowse({
   return (
     <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
       <div className="mx-auto w-full max-w-5xl space-y-6 px-6">
-        {onSeeInstalled && installedPreview.length > 0 ? (
+        {onSeeInstalled && connectedItems.length > 0 ? (
           <section className="flex flex-col gap-2.5">
             <h3 className="font-medium text-foreground text-sm">Installed</h3>
             <div className="grid grid-cols-1 gap-x-4 gap-y-2 sm:grid-cols-2">
-              {installedPreview.map((item) => (
+              {connectedItems.map((item) => (
                 <div
                   className="group/card flex items-center gap-3 rounded-xl border border-border bg-card px-3 py-2.5"
                   key={item.id}
@@ -289,13 +277,6 @@ function McpsBrowse({
                 </div>
               ))}
             </div>
-            <button
-              className="self-start text-muted-foreground text-sm transition-colors hover:text-foreground"
-              onClick={onSeeInstalled}
-              type="button"
-            >
-              {seeMoreLabel}
-            </button>
           </section>
         ) : null}
 
