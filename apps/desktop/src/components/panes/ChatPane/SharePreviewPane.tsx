@@ -20,6 +20,7 @@ import {
   gatherShareAttributionItems,
   resolveOutputModel,
   resolveRecipePrompt,
+  turnsForOutputs,
   gatherShareFiles,
   gatherShareImages,
   gatherShareVideos,
@@ -189,10 +190,7 @@ export function SharePreviewPane() {
     }
     // Seed the apps that made these outputs; the user adds any skills/MCPs in the
     // composer's attach picker next.
-    const sourceInputIds = new Set(
-      chosenOutputs.map((o) => o.input_id).filter(Boolean)
-    );
-    const sourceTurns = messages.filter((m) => sourceInputIds.has(m.id));
+    const sourceTurns = turnsForOutputs(chosenOutputs, messages);
     const items = [
       ...gatherQuotedToolItems(sourceTurns, toolNames),
       ...gatherShareAttributionItems(chosenOutputs),

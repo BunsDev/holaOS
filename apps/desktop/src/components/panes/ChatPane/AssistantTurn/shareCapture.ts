@@ -303,21 +303,51 @@ export async function gatherSessionSnapshot(
 }
 
 /**
+ * The turns that produced these outputs. An output knows the input it came from,
+ * and the renderer keys its assistant turn as `assistant-<inputId>` — the user
+ * turn is the one before it, since its own id is a client-side timestamp with no
+ * relation to the input. Empty when nothing matches, which is what happens for
+ * an output the renderer never rendered a turn for.
+ */
+export function turnsForOutputs(
+  outputs: ShareableOutput[],
+  messages: ChatMessage[]
+): ChatMessage[] {
+  const found: ChatMessage[] = [];
+  const seen = new Set<string>();
+  for (const output of outputs) {
+    const inputId = output.input_id;
+    if (!inputId) {
+      continue;
+    }
+    const index = messages.findIndex((m) => m.id === `assistant-${inputId}`);
+    if (index < 0) {
+      continue;
+    }
+    for (const candidate of [messages[index - 1], messages[index]]) {
+      if (candidate && !seen.has(candidate.id)) {
+        seen.add(candidate.id);
+        found.push(candidate);
+      }
+    }
+  }
+  return found;
+}
+
+/**
  * The prompt a viewer needs to make their own equivalent: the ask that produced
- * these outputs, resolved through the output's `input_id`, falling back to the
- * conversation's opening ask. Any quoted-skill command lines are stripped — the
- * skills travel as items, and leaving the raw `/skill` lines in would seed a
- * prompt that only runs for someone who happens to have them installed.
+ * these outputs, falling back to the conversation's opening ask. Any quoted-skill
+ * command lines are stripped — the skills travel as items, and leaving the raw
+ * `/skill` lines in would seed a prompt that only runs for someone who happens to
+ * have them installed.
  */
 export function resolveRecipePrompt(
   outputs: ShareableOutput[],
   messages: ChatMessage[]
 ): string {
-  const inputId = outputs.find((o) => o.input_id)?.input_id;
-  const byInput = inputId
-    ? messages.find((m) => m.role === "user" && m.id === inputId)
-    : undefined;
-  const source = byInput ?? messages.find((m) => m.role === "user");
+  const source =
+    turnsForOutputs(outputs, messages).find((m) => m.role === "user") ??
+    messages.find((m) => m.role === "user");
   const text = (source?.text ?? "").trim();
   if (!text) {
     return "";
