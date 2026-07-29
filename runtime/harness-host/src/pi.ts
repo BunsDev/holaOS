@@ -110,6 +110,7 @@ import {
 } from "./harness-ai-monitoring.js";
 import { createPiFindToolDefinition } from "./pi-find-tool.js";
 import { createPiDocumentReadToolDefinitions } from "./pi-document-read-tool.js";
+import { downscaleInlineImage } from "./image-downscale.js";
 import { createPiSearchToolDefinition } from "./pi-search-tool.js";
 import { installBenignStdioEpipeGuard } from "./stdio-epipe.js";
 import {
@@ -1755,6 +1756,89 @@ function measureToolContentBytes(result: unknown): number {
   return total;
 }
 
+const DEFAULT_SESSION_IMAGE_CONTEXT_BUDGET_BYTES = 16 * 1024 * 1024;
+
+/**
+ * Evict the oldest inline images from the live transcript once their cumulative
+ * base64 size exceeds the budget. pi retains every screenshot and read-image at
+ * full resolution for the life of the session, so a browser-heavy run accumulates
+ * 100MB+ of base64 image data. That pushes the provider request past its hard
+ * ~30MB request-size ceiling (413 request_too_large) — and, worse, makes
+ * auto-compaction fail too, because the summary request carries the same
+ * oversized history (compaction cannot compress a payload it cannot transmit). We
+ * keep the most RECENT images (the ones the current turn is most likely to need)
+ * and swap older ones for a short text placeholder so every request stays
+ * sendable. Reads and writes go through the supported `session.state.messages`
+ * accessor; the swap is idempotent, so it can run before every turn cheaply.
+ * Returns the number of images elided (0 = nothing changed).
+ */
+export function capSessionImageContext(
+  session: unknown,
+  budgetBytes: number = envBytes(
+    "HOLABOSS_SESSION_IMAGE_CONTEXT_BUDGET_BYTES",
+    DEFAULT_SESSION_IMAGE_CONTEXT_BUDGET_BYTES,
+  ),
+): number {
+  const state = isRecord(session) ? (session as { state?: unknown }).state : undefined;
+  if (!isRecord(state)) {
+    return 0;
+  }
+  let messages: unknown;
+  try {
+    messages = (state as { messages?: unknown }).messages;
+  } catch {
+    return 0;
+  }
+  if (!Array.isArray(messages) || messages.length === 0) {
+    return 0;
+  }
+  let cumulativeBytes = 0;
+  let elided = 0;
+  // Walk newest -> oldest so the freshest images fill the budget first and
+  // survive; the images swapped out are always the older ones.
+  const next = messages.slice();
+  for (let i = next.length - 1; i >= 0; i -= 1) {
+    const message = next[i];
+    const content = isRecord(message) ? message.content : undefined;
+    if (!Array.isArray(content)) {
+      continue;
+    }
+    let changed = false;
+    const newContent = content.map((block) => {
+      if (
+        !isRecord(block) ||
+        block.type !== "image" ||
+        typeof block.data !== "string"
+      ) {
+        return block;
+      }
+      const bytes = block.data.length;
+      if (cumulativeBytes + bytes <= budgetBytes) {
+        cumulativeBytes += bytes;
+        return block;
+      }
+      changed = true;
+      elided += 1;
+      const placeholder: TextContent = {
+        type: "text",
+        text: `[image omitted — ~${Math.round(bytes / 1024)}KB elided to keep the conversation within the model's request-size limit]`,
+      };
+      return placeholder;
+    });
+    if (changed) {
+      next[i] = { ...(message as Record<string, unknown>), content: newContent };
+    }
+  }
+  if (elided > 0) {
+    try {
+      (state as { messages: unknown }).messages = next;
+    } catch {
+      return 0;
+    }
+  }
+  return elided;
+}
+
 function safeToolFilenamePart(value: string): string {
   return value.replace(SAFE_TOOL_NAME_PART_REGEXP, "_").slice(0, 80) || "tool";
 }
@@ -1788,6 +1872,55 @@ function writeToolOverflowFile(params: {
   } catch {
     return null;
   }
+}
+
+/**
+/**
+ * Downscale any inline images a tool returns BEFORE they enter the model context.
+ * Screenshots (browser tools) and read-in images (document-read) arrive at full
+ * resolution — a handful in a single turn pushes the request past the provider's
+ * ~30MB size ceiling (413 request_too_large) mid-loop, which no end-of-turn
+ * pruning can prevent. Running at the tool-result source protects the within-turn
+ * LLM calls too, and unlike eviction it keeps the image usable (just smaller), so
+ * it is safe to apply to the current turn's own screenshots. Best-effort per
+ * image: a decode/encode failure leaves that image untouched.
+ */
+export function wrapToolWithImageDownscale<
+  TTool extends { name: string; execute: (...args: any[]) => Promise<any> },
+>(tool: TTool): TTool {
+  const originalExecute = tool.execute.bind(tool);
+  const wrapped: TTool = {
+    ...tool,
+    execute: (async (...args: any[]) => {
+      const result = await originalExecute(...args);
+      if (!isRecord(result) || !Array.isArray(result.content)) {
+        return result;
+      }
+      let changed = false;
+      const content = await Promise.all(
+        result.content.map(async (block: unknown) => {
+          if (
+            !isRecord(block) ||
+            block.type !== "image" ||
+            typeof block.data !== "string"
+          ) {
+            return block;
+          }
+          const downscaled = await downscaleInlineImage(block.data);
+          if (!downscaled) {
+            return block;
+          }
+          changed = true;
+          return { ...block, data: downscaled.data, mimeType: downscaled.mimeType };
+        }),
+      );
+      if (!changed) {
+        return result;
+      }
+      return { ...result, content };
+    }) as TTool["execute"],
+  };
+  return wrapped;
 }
 
 /**
@@ -2864,37 +2997,47 @@ async function defaultCreateSession(request: HarnessHostPiRequest): Promise<PiSe
   // piling onto the context (bounds long browser/tool-heavy sessions).
   const toolOutputCapState = createToolOutputCapState();
   const tools = baseTools.map((tool) =>
-    // Outermost: one wall-clock deadline over the whole tool-call chain, so a
-    // runaway `bash` (e.g. `find /`) can't freeze the session for hours.
-    wrapToolWithTimeout(
-      wrapToolWithOutputCap(
-        wrapToolWithSkillWidening(
-          // Innermost: only the real spawn sees the temp-script rewrite; the
-          // skill-widening and output-cap layers above still see the original command.
-          wrapBashToolForWindowsCommandLimit(tool),
-          skillWideningState,
-        ),
-        agentCwd,
-        toolOutputCapState,
+    // Outermost: downscale any inline images the tool returns before they reach
+    // the context, so an image-heavy turn stays under the provider size limit.
+    wrapToolWithImageDownscale(
+      // One wall-clock deadline over the whole tool-call chain, so a runaway
+      // `bash` (e.g. `find /`) can't freeze the session for hours.
+      wrapToolWithTimeout(
+        wrapToolWithOutputCap(
+          wrapToolWithSkillWidening(
+            // Innermost: only the real spawn sees the temp-script rewrite; the
+            // skill-widening and output-cap layers above still see the original command.
+            wrapBashToolForWindowsCommandLimit(tool),
+            skillWideningState,
+          ),
+          agentCwd,
+          toolOutputCapState,
+        )
       )
     )
   );
   const customTools = [
     ...nonSkillCustomTools.map((tool) =>
-      wrapToolWithTimeout(
-        wrapToolWithOutputCap(
-          wrapToolWithSkillWidening(tool, skillWideningState),
-          agentCwd,
-          toolOutputCapState,
+      // Browser screenshots and read-in images flow through here — downscale
+      // them at the source so the within-turn requests stay sendable.
+      wrapToolWithImageDownscale(
+        wrapToolWithTimeout(
+          wrapToolWithOutputCap(
+            wrapToolWithSkillWidening(tool, skillWideningState),
+            agentCwd,
+            toolOutputCapState,
+          )
         )
       )
     ),
     ...skillTools.map((tool) =>
-      wrapToolWithTimeout(
-        wrapToolWithOutputCap(
-          tool,
-          agentCwd,
-          toolOutputCapState,
+      wrapToolWithImageDownscale(
+        wrapToolWithTimeout(
+          wrapToolWithOutputCap(
+            tool,
+            agentCwd,
+            toolOutputCapState,
+          )
         )
       )
     ),
@@ -3556,6 +3699,10 @@ export async function runPi(request: HarnessHostPiRequest, deps: PiDeps = defaul
       return;
     }
     try {
+      // Compaction sends the full history to be summarized, so an image-bloated
+      // transcript would 413 the compaction request just like the turn did. Prune
+      // oversized inline images first so the summary request stays sendable.
+      capSessionImageContext(session);
       await session.compact();
     } catch (error) {
       console.warn("pi end-of-turn compaction failed (non-fatal)", {
@@ -3678,6 +3825,17 @@ export async function runPi(request: HarnessHostPiRequest, deps: PiDeps = defaul
     },
     async (span) => {
       try {
+        // A resumed session can already be over the provider request-size limit
+        // (a browser-heavy run accumulates 100MB+ of full-res screenshots). Prune
+        // oversized inline images BEFORE the first request of the turn, so an
+        // already-bloated session doesn't 413 on send — and so pi's own overflow
+        // compaction, if it fires, has a sendable payload to summarize.
+        const elidedBeforeTurn = capSessionImageContext(handle.session);
+        if (elidedBeforeTurn > 0) {
+          console.warn(
+            `[pi] elided ${elidedBeforeTurn} oversized inline image(s) from the transcript before this turn to stay under the provider request-size limit`,
+          );
+        }
         await handle.session.sendUserMessage(await promptContentForRequest(request));
         const retryable = handle.session as unknown as {
           isRetrying?: boolean;
@@ -3801,6 +3959,16 @@ export async function runPi(request: HarnessHostPiRequest, deps: PiDeps = defaul
         });
         return 1;
       } finally {
+        // Prune oversized inline images on every exit path — including a turn that
+        // failed on an oversized request (413) — so the persisted session shrinks
+        // and the next turn resumes from a sendable payload instead of re-hitting
+        // the same wall. Previously nothing ran after a failed turn, so an
+        // image-bloated session stayed stuck. Best-effort; must never throw here.
+        try {
+          capSessionImageContext(handle.session);
+        } catch {
+          // cleanup must not mask the turn's real outcome
+        }
         if (timeoutHandle) {
           clearTimeout(timeoutHandle);
         }
