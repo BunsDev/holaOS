@@ -1160,7 +1160,7 @@ function buildEvaluationMetadata(fingerprint: string): AgentCapabilityEvaluation
     fingerprint,
     refresh_behavior: "run_start_snapshot",
     refresh_summary:
-      "Capability evaluation is captured once at run start. New skills or commands appear on the next run.",
+      "This list is a snapshot taken at run start, so a skill or command added mid-run is missing from the list — not from the workspace. Load one by name with `skill({ name })`, which reads from disk on every call.",
   };
 }
 
