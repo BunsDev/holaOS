@@ -242,6 +242,30 @@ interface ExtractedSkill {
   skillSrc: string;
 }
 
+// Find folders that directly contain a SKILL.md, looking at the repo root's
+// immediate children and one level into a `skills/` dir (the common plugin /
+// collection layout: `.claude-plugin` repos keep skills in `skills/<name>/`).
+// Used to salvage a bare-repo URL whose root has no SKILL.md.
+function findSkillDirs(repoRoot: string): string[] {
+  const found: string[] = [];
+  const bases = [repoRoot, path.join(repoRoot, "skills")];
+  for (const base of bases) {
+    if (!(fs.existsSync(base) && fs.statSync(base).isDirectory())) {
+      continue;
+    }
+    for (const entry of fs.readdirSync(base, { withFileTypes: true })) {
+      if (!entry.isDirectory() || entry.name.startsWith(".")) {
+        continue;
+      }
+      const dir = path.join(base, entry.name);
+      if (fs.existsSync(path.join(dir, "SKILL.md"))) {
+        found.push(dir);
+      }
+    }
+  }
+  return found;
+}
+
 async function extractSkillFolder(buffer: Buffer, ref: GithubSkillRef): Promise<ExtractedSkill> {
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "hb-skill-import-"));
   try {
@@ -256,13 +280,32 @@ async function extractSkillFolder(buffer: Buffer, ref: GithubSkillRef): Promise<
       throw new SkillImportError(502, "unexpected tarball layout from GitHub");
     }
     const repoRoot = path.join(outDir, roots[0].name);
-    const skillSrc = ref.subPath ? path.resolve(repoRoot, ref.subPath) : repoRoot;
+    let skillSrc = ref.subPath ? path.resolve(repoRoot, ref.subPath) : repoRoot;
     if (skillSrc !== repoRoot && !skillSrc.startsWith(`${repoRoot}${path.sep}`)) {
       throw new SkillImportError(400, "resolved skill path escapes the repository");
     }
     if (!fs.existsSync(path.join(skillSrc, "SKILL.md"))) {
-      const where = ref.subPath ? `"${ref.subPath}"` : "the repository root";
-      throw new SkillImportError(404, `no SKILL.md found at ${where}; point the URL at the skill folder`);
+      // No SKILL.md where the URL pointed. When the URL was a bare repo (no
+      // sub-path), it's often a plugin/collection repo whose skill lives in
+      // `skills/<name>/` — auto-discover a LONE skill so it still installs. If
+      // there are several, we can't guess: tell the user to pick one.
+      if (!ref.subPath) {
+        const candidates = findSkillDirs(repoRoot);
+        const [only] = candidates;
+        if (candidates.length === 1 && only) {
+          skillSrc = only;
+        } else if (candidates.length > 1) {
+          const rels = candidates.map((d) => path.relative(repoRoot, d)).join(", ");
+          throw new SkillImportError(
+            422,
+            `repo has ${candidates.length} skills (${rels}); point the URL at one skill folder`,
+          );
+        }
+      }
+      if (!fs.existsSync(path.join(skillSrc, "SKILL.md"))) {
+        const where = ref.subPath ? `"${ref.subPath}"` : "the repository root";
+        throw new SkillImportError(404, `no SKILL.md found at ${where}; point the URL at the skill folder`);
+      }
     }
     return { tmpRoot, skillSrc };
   } catch (error) {
