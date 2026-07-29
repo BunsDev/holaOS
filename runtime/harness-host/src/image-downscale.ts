@@ -1,12 +1,25 @@
 import { createCanvas, loadImage } from "@napi-rs/canvas";
 
-// Anthropic (and most providers) already downsize images whose long edge exceeds
-// ~1568px, so carrying anything larger buys no quality — only cost. Re-encoding a
-// screenshot to JPEG shrinks it 5-10x versus PNG, which is where most of the win
-// comes from even when the dimensions are already within bounds.
-export const DEFAULT_MAX_IMAGE_DIMENSION = 1568;
+// Match the model's own high-res ceiling: current-gen vision (Opus 4.7/4.8,
+// Fable 5) downsizes images to a ~2576px long edge (older models to 1568px), so
+// capping here at 2576 preserves all the detail the model can use and lets it
+// resize further itself when it can't — while still re-encoding to JPEG, which
+// shrinks a screenshot 5-10x versus PNG. Resizing BELOW the model's ceiling is
+// what blurs small text (numbers, fine print) in dense screenshots, so keep the
+// cap high; the JPEG re-encode is the cheap part of the win. All three knobs are
+// env-tunable so this can be dialed without a rebuild.
+export const DEFAULT_MAX_IMAGE_DIMENSION = 2576;
 export const DEFAULT_DOWNSCALE_TRIGGER_BYTES = 512 * 1024;
-export const DEFAULT_JPEG_QUALITY = 0.8;
+export const DEFAULT_JPEG_QUALITY = 0.85;
+
+function envPositiveNumber(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (!raw) {
+    return fallback;
+  }
+  const value = Number(raw);
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+}
 
 export interface DownscaleInlineImageOptions {
   /** Long-edge pixel cap. Larger images are scaled down proportionally. */
@@ -38,7 +51,12 @@ export async function downscaleInlineImage(
   base64: string,
   options: DownscaleInlineImageOptions = {},
 ): Promise<DownscaledImage | null> {
-  const triggerBytes = options.triggerBytes ?? DEFAULT_DOWNSCALE_TRIGGER_BYTES;
+  const triggerBytes =
+    options.triggerBytes ??
+    envPositiveNumber(
+      "HOLABOSS_IMAGE_DOWNSCALE_TRIGGER_BYTES",
+      DEFAULT_DOWNSCALE_TRIGGER_BYTES,
+    );
   if (typeof base64 !== "string" || base64.length <= triggerBytes) {
     return null;
   }
@@ -50,7 +68,12 @@ export async function downscaleInlineImage(
     if (!width || !height) {
       return null;
     }
-    const maxDimension = options.maxDimension ?? DEFAULT_MAX_IMAGE_DIMENSION;
+    const maxDimension =
+      options.maxDimension ??
+      envPositiveNumber(
+        "HOLABOSS_IMAGE_DOWNSCALE_MAX_DIM",
+        DEFAULT_MAX_IMAGE_DIMENSION,
+      );
     const scale = Math.min(1, maxDimension / Math.max(width, height));
     const targetWidth = Math.max(1, Math.round(width * scale));
     const targetHeight = Math.max(1, Math.round(height * scale));
@@ -59,7 +82,8 @@ export async function downscaleInlineImage(
     context.drawImage(image, 0, 0, targetWidth, targetHeight);
     const encoded = canvas.toBuffer(
       "image/jpeg",
-      options.quality ?? DEFAULT_JPEG_QUALITY,
+      options.quality ??
+        envPositiveNumber("HOLABOSS_IMAGE_DOWNSCALE_QUALITY", DEFAULT_JPEG_QUALITY),
     );
     const encodedBase64 = encoded.toString("base64");
     // Keep the original if the re-encode did not actually save bytes (e.g. an
