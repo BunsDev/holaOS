@@ -2194,40 +2194,13 @@ export function phaseTraceStepFromEvent(
   }
 
   if (eventType === "mcp_server_unavailable") {
-    const serverId =
-      typeof payload.server_id === "string" ? payload.server_id.trim() : "";
-    const reason =
-      typeof payload.reason === "string" ? payload.reason.trim() : "";
-    const missingToolIds = Array.isArray(payload.missing_tool_ids)
-      ? payload.missing_tool_ids.filter(
-          (item): item is string => typeof item === "string" && item.length > 0,
-        )
-      : [];
-    if (reason) {
-      details.push(reason);
-    }
-    if (missingToolIds.length > 0) {
-      const preview = missingToolIds.slice(0, 5).join(", ");
-      const suffix =
-        missingToolIds.length > 5
-          ? ` (+${missingToolIds.length - 5} more)`
-          : "";
-      details.push(`Skipped tools: ${preview}${suffix}`);
-    }
-    return {
-      id: `phase:mcp-unavailable:${serverId || `seq-${order}`}`,
-      kind: "phase",
-      title: serverId
-        ? `MCP server unavailable: ${serverId}`
-        : "MCP server unavailable",
-      status: "error",
-      recoverable: true,
-      details:
-        details.length > 0
-          ? details
-          : ["The agent will continue without this server's tools."],
-      order,
-    };
+    // Don't surface this in the transcript at all. It's a recoverable notice —
+    // the run continues without the server's tools (e.g. an OAuth connector never
+    // signed into) — but rendering it every turn read as a failure and was pure
+    // noise. The actionable paths live elsewhere: the inline authorize card
+    // (mcpAuthorizations, collected in a separate pass) and Customize → MCPs →
+    // Custom apps (sign in / remove). So emit no step.
+    return null;
   }
 
   if (eventType === "auto_compaction_end") {
