@@ -181,10 +181,12 @@ export type PiEventMapperState = {
   skillMetadataByAlias: ReadonlyMap<string, PiSkillMetadata>;
   terminalState: "completed" | "failed" | null;
   waitingForUser: boolean;
-  /** A retryable assistant error that pi will attempt to recover from.
-   *  Held back from emission until pi confirms outcome (auto_retry_end
-   *  success=false → promote; successful subsequent message_end →
-   *  clear; agent_end without observed retry → fallback promote). */
+  /** A retryable OR context-overflow assistant error that pi will attempt
+   *  to recover from (a transient retry scheduled via setTimeout, or inline
+   *  auto-compaction). Held back from emission until pi confirms outcome
+   *  (auto_retry_end success=false → promote; successful subsequent
+   *  message_end → clear; sendUserMessage settling with it still pending →
+   *  fallback promote). */
   pendingRetryableFailure: PendingRetryableFailure | null;
 };
 
@@ -3242,24 +3244,6 @@ function normalizeAssistantFailureMessage(errorMessage: unknown, content: unknow
   );
 }
 
-/** Mirrors `pi-coding-agent`'s `_isRetryableError` regex so the mapper
- *  defers terminal failure for exactly the cases pi will internally
- *  retry. Source: `@earendil-works/pi-coding-agent/dist/core/agent-session.js`
- *  `_isRetryableError`. Keep in sync on pi upgrades.
- *
- *  Synced to @earendil 0.80.2: added `stream ended before message_stop`,
- *  `http2 request did not get a response`, `connection lost`, and
- *  `websocket closed/error`. The first is the key one — a transient mid-stream
- *  drop the library DOES retry, but which the pre-migration regex didn't match,
- *  so the mapper promoted run_failed and tore the harness down before pi's retry
- *  could run (an otherwise-recoverable turn hard-failed). */
-function isPiRetryableErrorMessage(message: string | null | undefined): boolean {
-  if (!message) return false;
-  return /overloaded|provider.?returned.?error|rate.?limit|too many requests|429|499|500|502|503|504|service.?unavailable|server.?error|internal.?error|network.?error|connection.?error|connection.?refused|connection.?lost|websocket.?closed|websocket.?error|other side closed|fetch failed|upstream.?connect|reset before headers|socket hang up|ended without|stream.?closed|stream ended before message_stop|http2 request did not get a response|timed? out|timeout|terminated|retry delay/i.test(
-    message
-  );
-}
-
 function maybeMapAssistantTerminalFailure(
   event: AgentSessionEvent,
   sessionFile: string,
@@ -3284,46 +3268,59 @@ function maybeMapAssistantTerminalFailure(
   const model = optionalTrimmedString(message.model) ?? null;
   const upstream = stopReason === "error" ? peekLatestUpstreamError({ withinMs: 60_000 }) : null;
   const failureMessage = enrichFailureMessageWithUpstream(baseFailureMessage, upstream);
-  // Retryable assistant errors (transient stream termination, provider
-  // overload, 5xx, etc.) are NOT promoted to run_failed here. pi schedules
-  // its own retry via setTimeout(agent.continue, 0) right after firing
-  // this message_end/turn_end. Emitting run_failed eagerly marks the run
-  // terminally failed, which causes the subagent runner to tear down the
-  // harness before pi's retry continuation actually runs — so retries
-  // never get a chance to recover. Instead we stash the failure and
-  // promote it at one of three later checkpoints:
-  //   - successful subsequent assistant message_end → clear (recovered)
-  //   - auto_retry_end with success=false → emit run_failed (exhausted)
-  //   - sendUserMessage resolves while the failure is still pending and
-  //     no retry outcome was observed → emit run_failed (fallback for
-  //     the case our regex matched but pi never actually retried)
-  if (stopReason === "error" && isPiRetryableErrorMessage(failureMessage)) {
-    state.pendingRetryableFailure = {
-      message: failureMessage,
-      stopReason,
-      provider,
-      model,
-      event: event.type,
-    };
-    return [];
-  }
-  state.terminalState = "failed";
-  return [
-    {
-      event_type: "run_failed",
-      payload: {
-        type: stopReason === "aborted" ? "AbortError" : "ProviderError",
-        message: failureMessage,
-        stop_reason: stopReason,
-        provider,
-        model,
-        event: event.type,
-        source: "pi",
-        harness_session_id: sessionFile,
-        ...providerHttpPayloadFromCapture(upstream),
+
+  // An ABORT is unambiguously terminal — the user cancelled and pi will not
+  // recover — so fail it eagerly, preserving the AbortError type. (The deferred
+  // path below always types failures as ProviderError via
+  // buildPendingFailureRunFailed, so an abort must not flow through it.)
+  if (stopReason === "aborted") {
+    state.terminalState = "failed";
+    return [
+      {
+        event_type: "run_failed",
+        payload: {
+          type: "AbortError",
+          message: failureMessage,
+          stop_reason: stopReason,
+          provider,
+          model,
+          event: event.type,
+          source: "pi",
+          harness_session_id: sessionFile,
+          ...providerHttpPayloadFromCapture(upstream),
+        },
       },
-    },
-  ];
+    ];
+  }
+
+  // Every ERROR is deferred — we do NOT try to predict whether pi will recover.
+  // pi's own loop is the single source of truth for the verdict; we stash the
+  // failure and let pi's ACTUAL outcome resolve it:
+  //   - a successful subsequent assistant message_end → clear (recovered).
+  //     Covers pi's transient retry (setTimeout agent.continue) AND its inline
+  //     overflow compaction (_runAutoCompaction("overflow") → agent.continue).
+  //   - auto_retry_end{success:false} → run_failed (retries exhausted).
+  //   - the sendUserMessage promise settling with the failure still pending →
+  //     run_failed. This is the guaranteed backstop for EVERY terminal error —
+  //     a plain non-retryable error, or an exhausted overflow (pi emits
+  //     compaction_end{willRetry:false} and ends the loop) — since none of
+  //     those produce a success message_end to clear the pending failure. The
+  //     settle path (buildPendingFailureRunFailed) carries the full metadata.
+  //
+  // This retired the hand-copied isPiRetryableErrorMessage regex, which
+  // mirrored pi's private _isRetryableError and repeatedly drifted (it missed
+  // "stream ended before message_stop" after the @earendil 0.80.2 migration,
+  // then every context-overflow pattern). By observing pi's outcome instead of
+  // predicting it, the desktop harness now resolves terminal state the same way
+  // the backend agent operator does — from pi's real result, not a mirror.
+  state.pendingRetryableFailure = {
+    message: failureMessage,
+    stopReason,
+    provider,
+    model,
+    event: event.type,
+  };
+  return [];
 }
 
 function buildPendingFailureRunFailed(
@@ -3598,6 +3595,32 @@ function mapPiEvent(
           },
         },
       ];
+    case "auto_retry_start":
+      // A dedicated (mapped) signal that pi is retrying the failed last message
+      // in-turn — it has removed that message from its own state (slice(0, -1))
+      // and will re-stream it. Consumers that accumulate the live delta stream
+      // (the desktop renderer, the api-server executor) key off this to discard
+      // the failed attempt's partial output so the retried stream doesn't
+      // concatenate onto the truncated one ("The answer is 4" + "The answer is
+      // 42."). Mirrors how compaction is surfaced as auto_compaction_start; it
+      // does NOT touch terminal state (the pending failure still resolves via a
+      // successful message_end / auto_retry_end / the settle fallback).
+      return [
+        nativeEvent,
+        {
+          event_type: "auto_retry_start",
+          payload: {
+            attempt: typeof event.attempt === "number" ? event.attempt : null,
+            max_attempts:
+              typeof event.maxAttempts === "number" ? event.maxAttempts : null,
+            delay_ms: typeof event.delayMs === "number" ? event.delayMs : null,
+            error_message:
+              typeof event.errorMessage === "string" ? event.errorMessage : null,
+            event: "auto_retry_start",
+            source: "pi",
+          },
+        },
+      ];
     case "auto_retry_end": {
       // pi emits auto_retry_end ONLY when retries are exhausted
       // (success=false). If a stashed pending failure exists, promote
@@ -3845,6 +3868,12 @@ export async function runPi(request: HarnessHostPiRequest, deps: PiDeps = defaul
         // oversized inline images BEFORE the first request of the turn, so an
         // already-bloated session doesn't 413 on send — and so pi's own overflow
         // compaction, if it fires, has a sendable payload to summarize.
+        // LOAD-BEARING — do not remove. The persisted session is never rewritten
+        // (append-only JSONL; the finally-path cap below only slims in-memory state,
+        // which is discarded when this per-turn process exits), so a resumed turn
+        // reloads the original full-res images from disk. This pre-turn re-elision
+        // is the only thing that keeps an image-bloated session under the ceiling on
+        // every resume; dropping it silently reintroduces the 413 / stuck hang.
         const elidedBeforeTurn = capSessionImageContext(handle.session);
         if (elidedBeforeTurn > 0) {
           console.warn(
@@ -3975,10 +4004,15 @@ export async function runPi(request: HarnessHostPiRequest, deps: PiDeps = defaul
         return 1;
       } finally {
         // Prune oversized inline images on every exit path — including a turn that
-        // failed on an oversized request (413) — so the persisted session shrinks
-        // and the next turn resumes from a sendable payload instead of re-hitting
-        // the same wall. Previously nothing ran after a failed turn, so an
-        // image-bloated session stayed stuck. Best-effort; must never throw here.
+        // failed on an oversized request (413). NOTE: this only slims THIS process's
+        // in-memory transcript (state.messages) — it does NOT shrink the persisted
+        // session. Persistence is append-only (the library never rewrites the JSONL),
+        // dispose() does not write state back to disk, and a resumed turn rebuilds
+        // state.messages from the persisted JSONL, which still holds the original
+        // full-res images. So this call is harmless in-process cleanup only; the
+        // durable protection comes from the pre-turn cap above (see line ~3848),
+        // which re-elides the reloaded full-res images at the start of every resumed
+        // turn. Best-effort; must never throw here.
         try {
           capSessionImageContext(handle.session);
         } catch {

@@ -356,49 +356,42 @@ test("runtimeToolSelectedModelForPiRequest preserves the original selected model
 
 test("mapPiSessionEvent extracts nested Gemini provider error messages", () => {
   const sessionFile = "/tmp/pi-session.jsonl";
+  const state = createPiEventMapperState();
 
-  assert.deepEqual(
-    derivedPiEvents(
-      {
-        type: "message_end",
-        message: {
-          role: "assistant",
-          content: [],
-          api: "google-generative-ai",
-          provider: "gemini_direct",
-          model: "gemini-2.5-flash",
-          usage: {
-            input: 0,
-            output: 0,
-            cacheRead: 0,
-            cacheWrite: 0,
-            totalTokens: 0,
-            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-          },
-          stopReason: "error",
-          errorMessage:
-            "{\"error\":{\"message\":\"{\\n  \\\"error\\\": {\\n    \\\"code\\\": 400,\\n    \\\"message\\\": \\\"User location is not supported for the API use.\\\",\\n    \\\"status\\\": \\\"FAILED_PRECONDITION\\\"\\n  }\\n}\\n\",\"code\":400,\"status\":\"Bad Request\"}}",
-          timestamp: Date.now(),
+  // L3: the error is deferred (resolved at settle, not eagerly), but the
+  // nested-provider-error extraction still runs — the human-readable message is
+  // stashed on the pending failure that the settle path later promotes.
+  const derived = derivedPiEvents(
+    {
+      type: "message_end",
+      message: {
+        role: "assistant",
+        content: [],
+        api: "google-generative-ai",
+        provider: "gemini_direct",
+        model: "gemini-2.5-flash",
+        usage: {
+          input: 0,
+          output: 0,
+          cacheRead: 0,
+          cacheWrite: 0,
+          totalTokens: 0,
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
         },
-      } as never,
-      sessionFile,
-      createPiEventMapperState()
-    ),
-    [
-      {
-        event_type: "run_failed",
-        payload: {
-          type: "ProviderError",
-          message: "User location is not supported for the API use.",
-          stop_reason: "error",
-          provider: "gemini_direct",
-          model: "gemini-2.5-flash",
-          event: "message_end",
-          source: "pi",
-          harness_session_id: sessionFile,
-        },
+        stopReason: "error",
+        errorMessage:
+          "{\"error\":{\"message\":\"{\\n  \\\"error\\\": {\\n    \\\"code\\\": 400,\\n    \\\"message\\\": \\\"User location is not supported for the API use.\\\",\\n    \\\"status\\\": \\\"FAILED_PRECONDITION\\\"\\n  }\\n}\\n\",\"code\":400,\"status\":\"Bad Request\"}}",
+        timestamp: Date.now(),
       },
-    ]
+    } as never,
+    sessionFile,
+    state
+  );
+
+  assert.deepEqual(derived, []);
+  assert.equal(
+    state.pendingRetryableFailure?.message,
+    "User location is not supported for the API use."
   );
 });
 
@@ -492,6 +485,222 @@ test("mapPiSessionEvent defers run_failed for upstream gateway stream-drop error
       `expected pendingRetryableFailure for ${errorMessage}`
     );
   }
+});
+
+test("mapPiSessionEvent defers run_failed for context-overflow errors so pi's inline compaction can recover the turn", () => {
+  const sessionFile = "/tmp/pi-session.jsonl";
+
+  // Context-overflow errors from across the provider matrix. pi is designed to
+  // auto-recover these INLINE (_checkCompaction → _runAutoCompaction("overflow")
+  // → agent.continue()), so the mapper must NOT escalate to run_failed on the
+  // intermediate error — doing so would mark the run terminally failed and tear
+  // the harness down before pi's compact-and-retry runs, discarding the
+  // recovered answer. Under L3 every error is deferred, so overflow is covered
+  // by construction; this test pins that behavior for the specific, high-value
+  // overflow case across the provider matrix.
+  for (const errorMessage of [
+    "prompt is too long: 213462 tokens > 200000 maximum", // Anthropic token overflow
+    '413 {"error":{"type":"request_too_large","message":"Request exceeds the maximum size"}}', // Anthropic 413
+    "Your input exceeds the context window of this model", // OpenAI
+    "Requested token count exceeds the model's maximum context length of 131072 tokens", // OpenAI/LiteLLM
+    "The input token count (1196265) exceeds the maximum number of tokens allowed (1048575)", // Gemini
+    "context_length_exceeded", // generic fallback
+    "Your request exceeded model token limit: 262144 (requested: 300000)", // Kimi For Coding
+    "invalid params, context window exceeds limit", // MiniMax
+  ]) {
+    const state = createPiEventMapperState();
+    const derived = derivedPiEvents(
+      {
+        type: "message_end",
+        message: {
+          role: "assistant",
+          content: [],
+          api: "anthropic-messages",
+          provider: "anthropic",
+          model: "claude-opus-4-8",
+          stopReason: "error",
+          errorMessage,
+          timestamp: Date.now(),
+        },
+      } as never,
+      sessionFile,
+      state
+    );
+
+    assert.deepEqual(derived, [], `expected overflow deferral for ${errorMessage}`);
+    assert.equal(state.terminalState, null, `expected non-terminal for ${errorMessage}`);
+    assert.ok(
+      state.pendingRetryableFailure,
+      `expected pendingRetryableFailure for overflow ${errorMessage}`
+    );
+  }
+});
+
+test("mapPiSessionEvent clears a stashed overflow failure when pi's compaction recovers the turn", () => {
+  const sessionFile = "/tmp/pi-session.jsonl";
+  const state = createPiEventMapperState();
+
+  // Overflow error is stashed (deferred), not failed.
+  derivedPiEvents(
+    {
+      type: "message_end",
+      message: {
+        role: "assistant",
+        content: [],
+        api: "anthropic-messages",
+        provider: "anthropic",
+        model: "claude-opus-4-8",
+        stopReason: "error",
+        errorMessage: "prompt is too long: 213462 tokens > 200000 maximum",
+        timestamp: Date.now(),
+      },
+    } as never,
+    sessionFile,
+    state
+  );
+  assert.ok(state.pendingRetryableFailure, "overflow should be stashed pending");
+
+  // pi compacts and re-runs the turn; the retried assistant message succeeds.
+  derivedPiEvents(
+    {
+      type: "message_end",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "here is the answer" }],
+        api: "anthropic-messages",
+        provider: "anthropic",
+        model: "claude-opus-4-8",
+        stopReason: "stop",
+        timestamp: Date.now(),
+      },
+    } as never,
+    sessionFile,
+    state
+  );
+  assert.equal(
+    state.pendingRetryableFailure,
+    null,
+    "a successful post-compaction message should clear the overflow pending"
+  );
+
+  // agent_end after recovery emits run_completed, not run_failed.
+  const derived = derivedPiEvents(
+    { type: "agent_end", messages: [] } as never,
+    sessionFile,
+    state
+  );
+  assert.equal(derived.length, 1);
+  assert.equal(derived[0]?.event_type, "run_completed");
+  assert.equal(state.terminalState, "completed");
+});
+
+test("mapPiSessionEvent keeps an exhausted overflow failure pending across agent_end (settle-fallback promotes it)", () => {
+  const sessionFile = "/tmp/pi-session.jsonl";
+  const state = createPiEventMapperState();
+
+  // Overflow error stashed.
+  derivedPiEvents(
+    {
+      type: "message_end",
+      message: {
+        role: "assistant",
+        content: [],
+        api: "anthropic-messages",
+        provider: "anthropic",
+        model: "claude-opus-4-8",
+        stopReason: "error",
+        errorMessage: "prompt is too long: 213462 tokens > 200000 maximum",
+        timestamp: Date.now(),
+      },
+    } as never,
+    sessionFile,
+    state
+  );
+
+  // pi cannot recover (compaction exhausted → compaction_end{willRetry:false},
+  // no successful message_end follows). agent_end must NOT finalize the run as
+  // completed here: the failure stays pending so runPi's sendUserMessage-settle
+  // fallback promotes it to run_failed. Finalizing run_completed here would
+  // silently swallow a genuinely unrecoverable overflow.
+  const raw = mapPiSessionEvent(
+    { type: "agent_end", messages: [] } as never,
+    sessionFile,
+    state
+  );
+  const derived = withoutPiNativeEvents(raw);
+
+  assert.deepEqual(derived, []);
+  assert.equal(state.terminalState, null);
+  assert.equal(
+    state.pendingRetryableFailure?.message,
+    "prompt is too long: 213462 tokens > 200000 maximum"
+  );
+});
+
+test("mapPiSessionEvent defers a terminal non-retryable error (verdict resolved at settle, not eagerly)", () => {
+  const sessionFile = "/tmp/pi-session.jsonl";
+  const state = createPiEventMapperState();
+
+  // L3: the mapper no longer predicts recoverability. Even a plainly terminal
+  // error (bad request) is deferred and held pending; runPi's
+  // sendUserMessage-settle fallback promotes it to run_failed once pi's loop
+  // ends without recovering. The mapper itself emits nothing here.
+  const derived = derivedPiEvents(
+    {
+      type: "message_end",
+      message: {
+        role: "assistant",
+        content: [],
+        api: "anthropic-messages",
+        provider: "anthropic",
+        model: "claude-opus-4-8",
+        stopReason: "error",
+        errorMessage: "400 Bad Request: unsupported model parameter",
+        timestamp: Date.now(),
+      },
+    } as never,
+    sessionFile,
+    state
+  );
+
+  assert.deepEqual(derived, []);
+  assert.equal(state.terminalState, null);
+  assert.equal(
+    state.pendingRetryableFailure?.message,
+    "400 Bad Request: unsupported model parameter"
+  );
+});
+
+test("mapPiSessionEvent still fails an aborted assistant message eagerly with AbortError", () => {
+  const sessionFile = "/tmp/pi-session.jsonl";
+  const state = createPiEventMapperState();
+
+  // Abort is the one terminal case kept eager: the user cancelled, pi will not
+  // recover, and it must retain the AbortError type (the deferred/promoted path
+  // always types failures as ProviderError).
+  const derived = derivedPiEvents(
+    {
+      type: "message_end",
+      message: {
+        role: "assistant",
+        content: [],
+        api: "anthropic-messages",
+        provider: "anthropic",
+        model: "claude-opus-4-8",
+        stopReason: "aborted",
+        errorMessage: "Request aborted by user",
+        timestamp: Date.now(),
+      },
+    } as never,
+    sessionFile,
+    state
+  );
+
+  assert.equal(derived.length, 1);
+  assert.equal(derived[0]?.event_type, "run_failed");
+  assert.equal(derived[0]?.payload.type, "AbortError");
+  assert.equal(state.terminalState, "failed");
+  assert.equal(state.pendingRetryableFailure, null);
 });
 
 test("mapPiSessionEvent promotes a stashed retryable failure to run_failed on auto_retry_end success=false", () => {
@@ -699,7 +908,11 @@ test("mapPiSessionEvent tolerates agent_end before auto_retry_start for retryabl
     state
   );
   const retryStart = withoutPiNativeEvents(retryStartRaw);
-  assert.deepEqual(retryStart, []);
+  // auto_retry_start now also emits a dedicated (mapped) event so stream
+  // consumers can reset their accumulated output; it must NOT touch terminal
+  // state or the pending failure.
+  assert.equal(retryStart.length, 1);
+  assert.equal(retryStart[0]?.event_type, "auto_retry_start");
   assert.equal(onlyPiNativeEvents(retryStartRaw).length, 1);
 
   derivedPiEvents(
@@ -728,6 +941,41 @@ test("mapPiSessionEvent tolerates agent_end before auto_retry_start for retryabl
   assert.equal(finalAgentEnd[0]?.event_type, "run_completed");
   assert.equal(state.pendingRetryableFailure, null);
   assert.equal(state.terminalState, "completed");
+});
+
+test("mapPiSessionEvent maps auto_retry_start to a dedicated reset signal without touching terminal state", () => {
+  const sessionFile = "/tmp/pi-session.jsonl";
+  const state = createPiEventMapperState();
+
+  const derived = derivedPiEvents(
+    {
+      type: "auto_retry_start",
+      attempt: 2,
+      maxAttempts: 3,
+      delayMs: 1500,
+      errorMessage: "stream ended before message_stop",
+    } as never,
+    sessionFile,
+    state
+  );
+
+  // The dedicated event lets stream consumers (renderer, executor) discard the
+  // failed attempt's partial output. It carries pi's retry metadata and leaves
+  // terminal/pending state untouched.
+  assert.equal(derived.length, 1);
+  assert.deepEqual(derived[0], {
+    event_type: "auto_retry_start",
+    payload: {
+      attempt: 2,
+      max_attempts: 3,
+      delay_ms: 1500,
+      error_message: "stream ended before message_stop",
+      event: "auto_retry_start",
+      source: "pi",
+    },
+  });
+  assert.equal(state.terminalState, null);
+  assert.equal(state.pendingRetryableFailure, null);
 });
 
 test("mapPiSessionEvent emits a pi_native_event passthrough for non-streaming Pi session events", () => {
@@ -1031,21 +1279,9 @@ test("mapPiSessionEvent maps text, thinking, tool, and completion events", () =>
       sessionFile,
       createPiEventMapperState()
     ),
-    [
-      {
-        event_type: "run_failed",
-        payload: {
-          type: "ProviderError",
-          message: "404 Not Found",
-          stop_reason: "error",
-          provider: "anthropic_direct",
-          model: "claude-sonnet-4-6",
-          event: "message_end",
-          source: "pi",
-          harness_session_id: sessionFile,
-        },
-      },
-    ]
+    // L3: a terminal error is deferred here (the verdict is resolved at settle,
+    // not eagerly), so the mapper yields no derived event for it.
+    []
   );
 
   assert.deepEqual(
