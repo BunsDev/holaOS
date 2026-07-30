@@ -5,14 +5,17 @@
 // in one turn stacks megabytes of base64 into the mid-loop request and can push
 // it past the provider's ~30MB request-size ceiling (413 request_too_large).
 //
-// Fix: route every tool result's image blocks through pi's OWN native
-// `resizeImage` (@earendil-works/pi-coding-agent — the same downscaler its built-in
-// read tool uses; Photon/WASM, no native binary to bundle, no extra dependency).
-// The model still sees the image, just downscaled. Applied to ALL tools in pi.ts,
-// so it covers every run uniformly. Mirrors the backend agent_operator's
-// tool_image_cap.ts — one downscaler across desktop + backend.
+// Fix: route every tool result's image blocks through @napi-rs/canvas (in-process,
+// ALREADY a harness-host dependency for PDF rendering — no new dep, no per-platform
+// native binary to bundle). Decode → resize to the long-edge cap → re-encode JPEG,
+// stepping quality down to fit the byte budget. The model still sees the image,
+// just downscaled. Applied to ALL tools in pi.ts, so it covers every run.
+//
+// NB: pi's own resizeImage (@earendil, Photon/WASM) was measured at ~2s PER image
+// (a fresh worker + WASM init per call) — far too slow for image-heavy turns.
+// @napi-rs/canvas does the equivalent in ~30ms in-process (~50-80x faster).
 
-import { resizeImage } from "@earendil-works/pi-coding-agent";
+import { createCanvas, loadImage } from "@napi-rs/canvas";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 
 /** Long-edge pixel cap (env-tunable). 2576 matches current vision models' own
@@ -41,12 +44,49 @@ function defaultOptions(): ToolImageCapOptions {
   };
 }
 
-/** The subset of pi's `resizeImage` we depend on — injectable for tests. */
+/** The resizer contract (canvas by default) — injectable for tests. */
 export type ImageResizer = (
   bytes: Uint8Array,
   mimeType: string,
   options: { maxWidth: number; maxHeight: number; maxBytes: number },
 ) => Promise<{ data: string; mimeType: string } | null>;
+
+/**
+ * In-process resizer (the production default): decode with @napi-rs/canvas, resize
+ * to fit within maxWidth/maxHeight (no enlargement), and re-encode JPEG, stepping
+ * quality down until it fits maxBytes. ~30ms/image. Returns null on any failure or
+ * an undecodable buffer, so the caller keeps the original.
+ */
+export const canvasResizer: ImageResizer = async (
+  bytes,
+  _mimeType,
+  { maxWidth, maxHeight, maxBytes },
+) => {
+  try {
+    const image = await loadImage(Buffer.from(bytes));
+    if (!image.width || !image.height) {
+      return null;
+    }
+    const maxDim = Math.max(1, Math.min(maxWidth, maxHeight));
+    const scale = Math.min(1, maxDim / Math.max(image.width, image.height));
+    const width = Math.max(1, Math.round(image.width * scale));
+    const height = Math.max(1, Math.round(image.height * scale));
+    const canvas = createCanvas(width, height);
+    canvas.getContext("2d").drawImage(image, 0, 0, width, height);
+    // Step quality down until the encoded image fits the byte budget; keep the
+    // lowest-quality attempt if none fit (still far smaller than a full-res PNG).
+    let encoded = canvas.toBuffer("image/jpeg", 0.85);
+    for (const quality of [0.75, 0.65, 0.5]) {
+      if (encoded.length <= maxBytes) {
+        break;
+      }
+      encoded = canvas.toBuffer("image/jpeg", quality);
+    }
+    return { data: encoded.toString("base64"), mimeType: "image/jpeg" };
+  } catch {
+    return null;
+  }
+};
 
 function isImageBlock(
   block: unknown,
@@ -91,12 +131,12 @@ async function capImageBlock<T>(
 /**
  * Downscale every oversized image block in a tool result's content array. Returns
  * the SAME array reference when nothing changed so callers can skip the copy.
- * `resize` is injectable purely for tests; production uses pi's `resizeImage`.
+ * `resize` is injectable purely for tests; production uses `canvasResizer`.
  */
 export async function capToolResultImages<T>(
   content: T[],
   opts: ToolImageCapOptions = defaultOptions(),
-  resize: ImageResizer = resizeImage as unknown as ImageResizer,
+  resize: ImageResizer = canvasResizer,
 ): Promise<T[]> {
   if (!Array.isArray(content)) {
     return content;
@@ -122,7 +162,7 @@ export async function capToolResultImages<T>(
 export function wrapToolWithImageCap(
   tool: ToolDefinition,
   opts: ToolImageCapOptions = defaultOptions(),
-  resize: ImageResizer = resizeImage as unknown as ImageResizer,
+  resize: ImageResizer = canvasResizer,
 ): ToolDefinition {
   const originalExecute = tool.execute.bind(tool);
   return {
