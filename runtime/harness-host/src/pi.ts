@@ -3245,10 +3245,17 @@ function normalizeAssistantFailureMessage(errorMessage: unknown, content: unknow
 /** Mirrors `pi-coding-agent`'s `_isRetryableError` regex so the mapper
  *  defers terminal failure for exactly the cases pi will internally
  *  retry. Source: `@earendil-works/pi-coding-agent/dist/core/agent-session.js`
- *  `_isRetryableError`. Keep in sync on pi upgrades. */
+ *  `_isRetryableError`. Keep in sync on pi upgrades.
+ *
+ *  Synced to @earendil 0.80.2: added `stream ended before message_stop`,
+ *  `http2 request did not get a response`, `connection lost`, and
+ *  `websocket closed/error`. The first is the key one — a transient mid-stream
+ *  drop the library DOES retry, but which the pre-migration regex didn't match,
+ *  so the mapper promoted run_failed and tore the harness down before pi's retry
+ *  could run (an otherwise-recoverable turn hard-failed). */
 function isPiRetryableErrorMessage(message: string | null | undefined): boolean {
   if (!message) return false;
-  return /overloaded|provider.?returned.?error|rate.?limit|too many requests|429|499|500|502|503|504|service.?unavailable|server.?error|internal.?error|network.?error|connection.?error|connection.?refused|other side closed|fetch failed|upstream.?connect|reset before headers|socket hang up|ended without|stream.?closed|timed? out|timeout|terminated|retry delay/i.test(
+  return /overloaded|provider.?returned.?error|rate.?limit|too many requests|429|499|500|502|503|504|service.?unavailable|server.?error|internal.?error|network.?error|connection.?error|connection.?refused|connection.?lost|websocket.?closed|websocket.?error|other side closed|fetch failed|upstream.?connect|reset before headers|socket hang up|ended without|stream.?closed|stream ended before message_stop|http2 request did not get a response|timed? out|timeout|terminated|retry delay/i.test(
     message
   );
 }

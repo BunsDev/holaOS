@@ -440,19 +440,23 @@ test("mapPiSessionEvent defers run_failed for retryable assistant errors so pi's
   assert.equal(state.pendingRetryableFailure?.message, "terminated");
 });
 
-test("mapPiSessionEvent defers run_failed for upstream gateway stream-drop errors (499, stream closed)", () => {
+test("mapPiSessionEvent defers run_failed for upstream gateway stream-drop errors (499, stream closed, @earendil message_stop drop)", () => {
   const sessionFile = "/tmp/pi-session.jsonl";
 
-  // Reproduces the two failure modes seen on the Research workspace
-  // diagnostics: holaboss model-proxy → OpenRouter → Anthropic dropping
-  // the SSE stream mid-response surfaces as either a literal 499 from the
-  // gateway or as `{"type":"error","error":{"type":"api_error","message":
-  // "stream closed before completion"}}` from OpenRouter. Both must be
-  // classified retryable so pi can fire its internal retry instead of
-  // the mapper escalating to ProviderError on the first hiccup.
+  // Reproduces the failure modes seen when holaboss model-proxy → OpenRouter →
+  // Anthropic drops the SSE stream mid-response: a literal 499 from the gateway,
+  // `{"type":"error",...,"message":"stream closed before completion"}` from
+  // OpenRouter, OR — after the @earendil 0.80.2 migration — the library's own
+  // "Anthropic stream ended before message_stop" (thrown when the stream drops
+  // after message_start but before message_stop; @earendil's _isRetryableError
+  // retries it, so our mirror must too). All must be classified retryable so pi
+  // can fire its internal retry instead of the mapper escalating to
+  // ProviderError and tearing the harness down before that retry runs.
   for (const errorMessage of [
     "499 Client Closed Request",
     '{"type":"error","error":{"type":"api_error","message":"stream closed before completion"}}',
+    "Anthropic stream ended before message_stop",
+    "http2 request did not get a response",
   ]) {
     const state = createPiEventMapperState();
     const derived = derivedPiEvents(
