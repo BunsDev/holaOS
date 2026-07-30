@@ -2916,8 +2916,12 @@ async function defaultCreateSession(request: HarnessHostPiRequest): Promise<PiSe
         resourceLoader,
         sessionManager,
         settingsManager,
-        tools,
-        customTools,
+        // pi 0.80: `tools` is a name ALLOWLIST, not tool definitions. Disable pi's
+        // builtin read/bash/edit/write with `noTools: "builtin"` and pass ALL our
+        // tools — our own wrapped coding tools (createCodingTools minus read) plus
+        // the custom tools — through `customTools`. (0.66 → 0.80 break.)
+        noTools: "builtin",
+        customTools: [...tools, ...customTools],
       })
     ));
   } catch (error) {

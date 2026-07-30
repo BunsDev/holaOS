@@ -20,13 +20,13 @@
     "typescript": "^5.9.3"
   },
   "overrides": {
-    "@earendil-works/pi-agent-core": "0.83.0",
-    "@earendil-works/pi-tui": "0.83.0"
+    "@earendil-works/pi-agent-core": "0.80.2",
+    "@earendil-works/pi-tui": "0.80.2"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.199",
-    "@earendil-works/pi-ai": "0.83.0",
-    "@earendil-works/pi-coding-agent": "0.83.0",
+    "@earendil-works/pi-ai": "0.80.2",
+    "@earendil-works/pi-coding-agent": "0.80.2",
     "@napi-rs/canvas": "^0.1.100",
     "@sinclair/typebox": "^0.34.41",
     "exceljs": "^4.4.0",

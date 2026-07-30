@@ -26,7 +26,7 @@
     "@holaboss/runtime-channel-gateway": "workspace:*",
     "@holaboss/runtime-state-store": "workspace:*",
     "@larksuiteoapi/node-sdk": "^1.67.0",
-    "@earendil-works/pi-coding-agent": "0.83.0",
+    "@earendil-works/pi-coding-agent": "0.80.2",
     "@modelcontextprotocol/sdk": "^1.28.0",
     "@slack/socket-mode": "^2.0.7",
     "@slack/web-api": "^7.17.0",
