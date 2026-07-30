@@ -282,10 +282,27 @@ export interface ShareDraftRecipe {
  *  once on its compose route via `holahub.consume-pending-share`, then prefills
  *  its composer. The sharer edits everything here except a `derived` item, which
  *  they may demote but not delete. */
+/** How an artifact was generated, read off the output record the runtime wrote.
+ *  Per-artifact, not per-post: four images in one post are four generations. */
+export interface ShareDraftGeneration {
+  /** The prompt actually sent to the generator — a skill compiles a detailed one
+   *  from a short ask, and that compiled text is the interesting half. */
+  prompt?: string;
+  /** What the provider rewrote the prompt to, when it does that. A separate
+   *  fact from `prompt`: one is what was asked for, the other what was used. */
+  revisedPrompt?: string;
+  /** Generator model id, e.g. "gpt-image-2". Not a session model. */
+  model?: string;
+  provider?: string;
+  size?: string;
+  seconds?: number;
+}
+
 export interface ShareDraftImage {
   /** base64 (no data: prefix) of the generated image file. */
   dataBase64: string;
   contentType: string;
+  generation?: ShareDraftGeneration;
 }
 
 /** A generated document (pptx/docx/pdf/…) captured from a turn — base64, keeping

@@ -1,5 +1,6 @@
 import type {
   ShareDraftFile,
+  ShareDraftGeneration,
   ShareDraftImage,
   ShareDraftItem,
   ShareDraftSessionStep,
@@ -64,13 +65,102 @@ function bytesToBase64(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
+/** What a capture had to leave behind, so the caller can say so. A share that
+ *  silently drops an artifact is indistinguishable from a broken button. */
+export type SkippedArtifact = {
+  name: string;
+  reason: "too-large" | "unreadable" | "no-workspace";
+};
+
+export function describeSkipped(skipped: SkippedArtifact[]): string {
+  if (skipped.length === 0) {
+    return "";
+  }
+  if (skipped.some((s) => s.reason === "no-workspace")) {
+    return "This chat has no workspace, so its files can't be read.";
+  }
+  const tooLarge = skipped.filter((s) => s.reason === "too-large");
+  if (tooLarge.length === skipped.length) {
+    const limit = Math.round(MAX_SHARE_IMAGE_BYTES / (1024 * 1024));
+    return skipped.length === 1
+      ? `${tooLarge[0].name} couldn't be brought under the ${limit}MB share limit.`
+      : `${skipped.length} artifacts couldn't be brought under the ${limit}MB share limit.`;
+  }
+  return skipped.length === 1
+    ? `${skipped[0].name} could not be read.`
+    : `${skipped.length} artifacts could not be included.`;
+}
+
+// A feed image gains nothing past this on either the card or the full-screen
+// viewer, and a generated poster routinely arrives several times larger.
+const MAX_SHARE_IMAGE_EDGE = 2048;
+// WebP over JPEG so a poster with transparency survives; the hub accepts both.
+const RECOMPRESS_TYPE = "image/webp";
+const RECOMPRESS_QUALITIES = [0.9, 0.8, 0.65];
+
+/**
+ * Bring an oversized image under the limit by capping its longest edge and
+ * re-encoding, dropping quality only if that alone is not enough. Lossy by
+ * definition — but the alternative was refusing to share it, and the prompt that
+ * made it travels separately, so what a viewer needs to reproduce it is intact.
+ *
+ * Null when it cannot be brought under, or when the format should not be touched
+ * (an animated GIF would come back as a single frame).
+ */
+async function recompressImage(
+  bytes: Uint8Array,
+  contentType: string
+): Promise<{ bytes: Uint8Array; contentType: string } | null> {
+  if (contentType === "image/gif") {
+    return null;
+  }
+  try {
+    // Copy into a plain ArrayBuffer: a Uint8Array over a SharedArrayBuffer is
+    // not a BlobPart, and what readFileBytes hands back is not guaranteed.
+    const buffer = new ArrayBuffer(bytes.byteLength);
+    new Uint8Array(buffer).set(bytes);
+    const source = await createImageBitmap(new Blob([buffer], { type: contentType }));
+    const scale = Math.min(
+      1,
+      MAX_SHARE_IMAGE_EDGE / Math.max(source.width, source.height)
+    );
+    const canvas = new OffscreenCanvas(
+      Math.max(1, Math.round(source.width * scale)),
+      Math.max(1, Math.round(source.height * scale))
+    );
+    const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      return null;
+    }
+    ctx.drawImage(source, 0, 0, canvas.width, canvas.height);
+    source.close();
+    for (const quality of RECOMPRESS_QUALITIES) {
+      const blob = await canvas.convertToBlob({
+        type: RECOMPRESS_TYPE,
+        quality,
+      });
+      if (blob.size > 0 && blob.size <= MAX_SHARE_IMAGE_BYTES) {
+        return {
+          bytes: new Uint8Array(await blob.arrayBuffer()),
+          contentType: RECOMPRESS_TYPE,
+        };
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 // Capture generated image outputs (by file extension) as base64 so the HolaHub
 // composer — which holds the session — can upload them on prefill.
 export async function gatherShareImages(
   outputs: ShareableOutput[],
-  workspaceId: string | null
+  workspaceId: string | null,
+  skipped?: SkippedArtifact[]
 ): Promise<ShareDraftImage[]> {
   if (!workspaceId) {
+    skipped?.push({ name: "", reason: "no-workspace" });
     return [];
   }
   const images: ShareDraftImage[] = [];
@@ -81,16 +171,29 @@ export async function gatherShareImages(
       continue;
     }
     try {
-      const bytes = await window.electronAPI.fs.readFileBytes(path, workspaceId);
-      if (bytes.length === 0 || bytes.length > MAX_SHARE_IMAGE_BYTES) {
+      const raw = await window.electronAPI.fs.readFileBytes(path, workspaceId);
+      if (raw.length === 0) {
+        skipped?.push({ name: baseName(path), reason: "unreadable" });
         continue;
+      }
+      let bytes = raw;
+      let contentType = SHARE_IMAGE_MIME[ext];
+      if (bytes.length > MAX_SHARE_IMAGE_BYTES) {
+        const smaller = await recompressImage(bytes, contentType);
+        if (!smaller) {
+          skipped?.push({ name: baseName(path), reason: "too-large" });
+          continue;
+        }
+        bytes = smaller.bytes;
+        contentType = smaller.contentType;
       }
       images.push({
         dataBase64: bytesToBase64(bytes),
-        contentType: SHARE_IMAGE_MIME[ext],
+        contentType,
+        ...(generationOf(output) ? { generation: generationOf(output) } : {}),
       });
     } catch {
-      // Unreadable output — skip it.
+      skipped?.push({ name: baseName(path), reason: "unreadable" });
     }
     if (images.length >= MAX_SHARE_IMAGES) {
       break;
@@ -119,7 +222,11 @@ export async function gatherShareVideos(
         continue;
       }
       return [
-        { dataBase64: bytesToBase64(bytes), contentType: SHARE_VIDEO_MIME[ext] },
+        {
+          dataBase64: bytesToBase64(bytes),
+          contentType: SHARE_VIDEO_MIME[ext],
+          ...(generationOf(output) ? { generation: generationOf(output) } : {}),
+        },
       ];
     } catch {
       // Unreadable — try the next output.
@@ -399,6 +506,33 @@ export function gatherQuotedToolItems(
     }
   }
   return items;
+}
+
+const nonEmpty = (value: unknown): string | undefined =>
+  typeof value === "string" && value.trim() ? value.trim() : undefined;
+
+/** The generation behind one artifact, off the metadata the runtime stamped.
+ *  Undefined when the producing tool recorded none — a file the end-of-turn scan
+ *  merely noticed has no generation to report. */
+function generationOf(
+  output: ShareableOutput
+): ShareDraftGeneration | undefined {
+  const meta = output.metadata;
+  if (!meta) {
+    return undefined;
+  }
+  const generation: ShareDraftGeneration = {
+    prompt: nonEmpty(meta.prompt),
+    revisedPrompt: nonEmpty(meta.revised_prompt),
+    model: nonEmpty(meta.model) ?? nonEmpty(meta.model_id),
+    provider: nonEmpty(meta.provider),
+    size: nonEmpty(meta.image_size) ?? nonEmpty(meta.video_size),
+    seconds:
+      typeof meta.video_seconds === "number" ? meta.video_seconds : undefined,
+  };
+  return Object.values(generation).some((v) => v !== undefined)
+    ? generation
+    : undefined;
 }
 
 /**

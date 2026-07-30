@@ -681,6 +681,9 @@ export interface RuntimeAgentToolsGenerateImageParams {
 export interface RuntimeAgentToolsGenerateVideoParams {
   workspaceId: string;
   sessionId?: string | null;
+  /** The turn this video belongs to — without it the recorded output is not
+   *  turn-scoped and the end-of-turn scan registers the file a second time. */
+  inputId?: string | null;
   selectedModel?: string | null;
   prompt: string;
   filename?: string | null;
@@ -5910,6 +5913,17 @@ export class RuntimeAgentToolsService {
           size_bytes: generated.sizeBytes,
           tool_id: "image_generate",
           model: generated.modelId,
+          // The generation itself, so anyone who sees this image later can read
+          // what produced it. `prompt` is what the caller compiled and sent;
+          // `revised_prompt` is what the provider rewrote it to, which is a
+          // different fact and worth keeping separately.
+          prompt: generated.prompt,
+          ...(generated.revisedPrompt
+            ? { revised_prompt: generated.revisedPrompt }
+            : {}),
+          ...(normalizedString(params.size)
+            ? { image_size: normalizedString(params.size) }
+            : {}),
           ...(generated.providerId ? { provider: generated.providerId } : {}),
           ...(sessionId ? { source_session_id: sessionId } : {}),
         },
@@ -5945,15 +5959,16 @@ export class RuntimeAgentToolsService {
       throw new RuntimeAgentToolsServiceError(400, "video_prompt_required", "prompt is required");
     }
     try {
+      const videoOutputRoot = this.store.sessionOutputRoot({
+        workspaceId: params.workspaceId,
+        sessionId,
+      });
       const generated = await generateWorkspaceVideo({
         workspaceRoot: this.options.workspaceRoot,
         workspaceId: params.workspaceId,
         // Project-bound sessions write artifacts under the project dir, not the
         // workspace root (mirrors resolveOutputAbsolutePath's read side).
-        outputRoot: this.store.sessionOutputRoot({
-          workspaceId: params.workspaceId,
-          sessionId,
-        }),
+        outputRoot: videoOutputRoot,
         sessionId,
         inputId: "runtime-tool",
         selectedModel: params.selectedModel,
@@ -5961,6 +5976,38 @@ export class RuntimeAgentToolsService {
         filename: params.filename,
         size: params.size,
         seconds: params.seconds,
+      });
+      // Same reason as image_generate: left to the end-of-turn file scan this
+      // would be recorded as "a new .mp4 appeared", with no trace of the prompt
+      // or model behind it. Absolute path so the scan's dedup matches.
+      this.store.createOutput({
+        workspaceId: params.workspaceId,
+        outputType: "video",
+        title: path.basename(generated.filePath),
+        status: "completed",
+        filePath: path.isAbsolute(generated.filePath)
+          ? generated.filePath
+          : path.join(videoOutputRoot, generated.filePath),
+        sessionId,
+        inputId: normalizedString(params.inputId) || null,
+        artifactId: randomUUID(),
+        metadata: {
+          origin_type: "runtime_tool",
+          change_type: "created",
+          category: "video",
+          artifact_type: "video",
+          mime_type: generated.mimeType,
+          size_bytes: generated.sizeBytes,
+          tool_id: "video_generate",
+          model: generated.modelId,
+          prompt: generated.prompt,
+          ...(normalizedString(params.size)
+            ? { video_size: normalizedString(params.size) }
+            : {}),
+          ...(params.seconds ? { video_seconds: params.seconds } : {}),
+          ...(generated.providerId ? { provider: generated.providerId } : {}),
+          ...(sessionId ? { source_session_id: sessionId } : {}),
+        },
       });
       return {
         file_path: generated.filePath,
