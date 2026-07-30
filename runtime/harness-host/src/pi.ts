@@ -110,6 +110,7 @@ import {
 } from "./harness-ai-monitoring.js";
 import { createPiFindToolDefinition } from "./pi-find-tool.js";
 import { createPiDocumentReadToolDefinitions } from "./pi-document-read-tool.js";
+import { wrapToolWithImageCap } from "./tool-image-cap.js";
 import { createPiSearchToolDefinition } from "./pi-search-tool.js";
 import { installBenignStdioEpipeGuard } from "./stdio-epipe.js";
 import {
@@ -2864,37 +2865,48 @@ async function defaultCreateSession(request: HarnessHostPiRequest): Promise<PiSe
   // piling onto the context (bounds long browser/tool-heavy sessions).
   const toolOutputCapState = createToolOutputCapState();
   const tools = baseTools.map((tool) =>
-    // Outermost: one wall-clock deadline over the whole tool-call chain, so a
-    // runaway `bash` (e.g. `find /`) can't freeze the session for hours.
-    wrapToolWithTimeout(
-      wrapToolWithOutputCap(
-        wrapToolWithSkillWidening(
-          // Innermost: only the real spawn sees the temp-script rewrite; the
-          // skill-widening and output-cap layers above still see the original command.
-          wrapBashToolForWindowsCommandLimit(tool),
-          skillWideningState,
-        ),
-        agentCwd,
-        toolOutputCapState,
+    // Outermost: downscale any inline images the tool returns (pi's native
+    // resizeImage) before they reach the model, so an image-heavy turn stays
+    // under the provider request-size limit.
+    wrapToolWithImageCap(
+      // One wall-clock deadline over the whole tool-call chain, so a runaway
+      // `bash` (e.g. `find /`) can't freeze the session for hours.
+      wrapToolWithTimeout(
+        wrapToolWithOutputCap(
+          wrapToolWithSkillWidening(
+            // Innermost: only the real spawn sees the temp-script rewrite; the
+            // skill-widening and output-cap layers above still see the original command.
+            wrapBashToolForWindowsCommandLimit(tool),
+            skillWideningState,
+          ),
+          agentCwd,
+          toolOutputCapState,
+        )
       )
     )
   );
   const customTools = [
     ...nonSkillCustomTools.map((tool) =>
-      wrapToolWithTimeout(
-        wrapToolWithOutputCap(
-          wrapToolWithSkillWidening(tool, skillWideningState),
-          agentCwd,
-          toolOutputCapState,
+      // Browser screenshots + read-in images flow through here — downscale at
+      // the source (pi's resizeImage) so within-turn requests stay sendable.
+      wrapToolWithImageCap(
+        wrapToolWithTimeout(
+          wrapToolWithOutputCap(
+            wrapToolWithSkillWidening(tool, skillWideningState),
+            agentCwd,
+            toolOutputCapState,
+          )
         )
       )
     ),
     ...skillTools.map((tool) =>
-      wrapToolWithTimeout(
-        wrapToolWithOutputCap(
-          tool,
-          agentCwd,
-          toolOutputCapState,
+      wrapToolWithImageCap(
+        wrapToolWithTimeout(
+          wrapToolWithOutputCap(
+            tool,
+            agentCwd,
+            toolOutputCapState,
+          )
         )
       )
     ),
