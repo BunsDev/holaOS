@@ -376,7 +376,7 @@ export async function gatherSessionSnapshot(
     if (message.role !== "user" && message.role !== "assistant") {
       continue;
     }
-    const outputs = message.outputs ?? [];
+    const outputs = mergeOutputsByPath(message.outputs ?? []);
     const text = visibleText(message);
     const steps =
       message.role === "assistant" ? stepsFromMessage(message) : [];
@@ -533,6 +533,37 @@ function generationOf(
   return Object.values(generation).some((v) => v !== undefined)
     ? generation
     : undefined;
+}
+
+/**
+ * One artifact, one entry. The runtime writes a record every time a file is
+ * touched — `image_generate` creates it, then `send_file` delivers it — and only
+ * the first one knows the prompt. Left as-is the picker offers the same image
+ * twice and a share that lands on the later record reports no generation at all.
+ */
+export function mergeOutputsByPath(
+  outputs: ShareableOutput[]
+): ShareableOutput[] {
+  const byPath = new Map<string, ShareableOutput>();
+  const order: string[] = [];
+  for (const output of outputs) {
+    const key = output.file_path ?? output.id;
+    const seen = byPath.get(key);
+    if (seen) {
+      // The kept record keeps its own fields and fills its gaps from the other.
+      byPath.set(key, {
+        ...seen,
+        metadata: { ...(output.metadata ?? {}), ...(seen.metadata ?? {}) },
+      });
+      continue;
+    }
+    byPath.set(key, output);
+    order.push(key);
+  }
+  return order.flatMap((key) => {
+    const output = byPath.get(key);
+    return output ? [output] : [];
+  });
 }
 
 /**

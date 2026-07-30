@@ -40,6 +40,7 @@ import {
   gatherShareImages,
   gatherShareVideos,
   isShareableMediaOutput,
+  mergeOutputsByPath,
 } from "./AssistantTurn/shareCapture";
 
 const MAX_PREVIEW_OUTPUTS = 6;
@@ -93,7 +94,7 @@ function useOutputShare(outputs: OutputItem[]) {
   // The whole session's shareable artifacts, not just the previewed few — the
   // gallery is the picker, so it shouldn't inherit the list's preview cap.
   const shareableOutputs = useMemo(
-    () => outputs.filter((o) => isShareableMediaOutput(o)),
+    () => mergeOutputsByPath(outputs.filter((o) => isShareableMediaOutput(o))),
     [outputs],
   );
 

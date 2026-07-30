@@ -12,6 +12,7 @@ import {
   gatherShareAttributionItems,
   resolveOutputModel,
   gatherShareImages,
+  mergeOutputsByPath,
   gatherShareVideos,
   isShareableMediaOutput,
 } from "./shareCapture";
@@ -438,8 +439,8 @@ function AssistantTurnComponent({
                   hasShareMediaOutput && discoverEnabled
                     ? () => {
                         Promise.all([
-                          gatherShareImages(outputs, workspaceId),
-                          gatherShareVideos(outputs, workspaceId),
+                          gatherShareImages(mergeOutputsByPath(outputs), workspaceId),
+                          gatherShareVideos(mergeOutputsByPath(outputs), workspaceId),
                         ]).then(([images, videos]) =>
                           shareToHolahub({
                             sourceText: copyText,

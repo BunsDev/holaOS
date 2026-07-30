@@ -28,6 +28,7 @@ import {
   gatherShareVideos,
   isShareableDocOutput,
   isShareableMediaOutput,
+  mergeOutputsByPath,
   type ShareableOutput,
   visibleText,
 } from "./AssistantTurn/shareCapture";
@@ -80,9 +81,11 @@ export function SharePreviewPane() {
   // deliverable docs (pdf/pptx/md/…) — the unit of the Outputs mode.
   const shareableOutputs = useMemo(
     () =>
-      messages.flatMap((m) =>
-        ((m.outputs ?? []) as ShareableOutput[]).filter(
-          (o) => isShareableMediaOutput(o) || isShareableDocOutput(o)
+      mergeOutputsByPath(
+        messages.flatMap((m) =>
+          ((m.outputs ?? []) as ShareableOutput[]).filter(
+            (o) => isShareableMediaOutput(o) || isShareableDocOutput(o)
+          )
         )
       ),
     [messages]
