@@ -29,12 +29,14 @@ import { useShareToHolahub } from "@/components/layout/shell/useShareToHolahub";
 import { billingRpcFetch } from "@/lib/app-sdk-client";
 import { useQuery } from "@tanstack/react-query";
 import {
+  enrichOutputs,
   gatherShareAttributionItems,
   resolveOutputModel,
   gatherShareImages,
   gatherShareVideos,
   isShareableMediaOutput,
   MAX_SHARE_IMAGES,
+  outputRecordsForTurns,
 } from "./shareCapture";
 import {
   Tooltip,
@@ -143,24 +145,29 @@ export function AssistantTurnOutputs({
       return;
     }
     setSharing(true);
-    Promise.all([
-      gatherShareImages(chosen, workspaceId ?? null),
-      gatherShareVideos(chosen, workspaceId ?? null),
-    ])
-      .then(([images, videos]) => {
-        shareToHolahub({
-          sourceText: turnText,
-          images,
-          videos,
-          items: gatherShareAttributionItems(chosen),
-          form: "output",
-          recipe: {
-            prompt: "",
-            model: "",
-            outputModel: resolveOutputModel(chosen),
-          },
+    // The card shows what was delivered; the record that knows the prompt is the
+    // one the generating tool wrote, and it never reaches a turn.
+    outputRecordsForTurns(workspaceId ?? null, chosen)
+      .then((pool) => {
+        const ready = enrichOutputs(chosen, pool);
+        return Promise.all([
+          gatherShareImages(ready, workspaceId ?? null),
+          gatherShareVideos(ready, workspaceId ?? null),
+        ]).then(([images, videos]) => {
+          shareToHolahub({
+            sourceText: turnText,
+            images,
+            videos,
+            items: gatherShareAttributionItems(ready),
+            form: "output",
+            recipe: {
+              prompt: "",
+              model: "",
+              outputModel: resolveOutputModel(ready),
+            },
+          });
+          setGalleryOpen(false);
         });
-        setGalleryOpen(false);
       })
       .finally(() => setSharing(false));
   };
@@ -168,31 +175,7 @@ export function AssistantTurnOutputs({
   // Quick-share the turn's single artifact (the nudge's action when there is
   // nothing to choose between).
   const shareAll = () => {
-    if (shareableCards.length === 0 || sharing) {
-      return;
-    }
-    setSharing(true);
-    Promise.all([
-      gatherShareImages(shareableCards, workspaceId ?? null),
-      gatherShareVideos(shareableCards, workspaceId ?? null),
-    ])
-      .then(([images, videos]) => {
-        shareToHolahub({
-          sourceText: turnText,
-          images,
-          videos,
-          items: gatherShareAttributionItems(shareableCards),
-          form: "output",
-          // A quick share knows what generated these but not the ask behind
-          // them — the full share pane is where a prompt gets resolved.
-          recipe: {
-            prompt: "",
-            model: "",
-            outputModel: resolveOutputModel(shareableCards),
-          },
-        });
-      })
-      .finally(() => setSharing(false));
+    shareChosen(shareableCards);
   };
 
   // Per-kind sequence numbers ("Tweet #2") as the last-resort name for an
