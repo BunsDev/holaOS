@@ -74,6 +74,33 @@ export function isTransientRuntimeError(error: unknown): boolean {
   );
 }
 
+const HTML_BODY = /^\s*<(?:!doctype\b|html\b)/i;
+const HTML_TITLE = /<title[^>]*>([\s\S]*?)<\/title>/i;
+/** Long enough for a real error sentence, short enough to read in a banner. */
+const MAX_MESSAGE_CHARS = 200;
+
+/**
+ * A non-JSON body did not come from the runtime — it came from whatever sat in
+ * front of it, and a gateway answers with a whole HTML page. Rendering that as
+ * the error message puts a Cloudflare document in the user's face. Keep the one
+ * human line it carries (its `<title>` names the host and the status) and drop
+ * the markup; the full body stays on `error.body` for the logs.
+ */
+function messageFromNonJsonBody(
+  statusCode: number,
+  statusMessage: string | undefined,
+  body: string
+): string {
+  const status = `${statusCode} ${statusMessage ?? ""}`.trim();
+  if (HTML_BODY.test(body)) {
+    const title = body.match(HTML_TITLE)?.[1]?.trim();
+    return title || status || "Runtime request failed.";
+  }
+  return body.length > MAX_MESSAGE_CHARS
+    ? `${body.slice(0, MAX_MESSAGE_CHARS).trimEnd()}…`
+    : body;
+}
+
 export function runtimeErrorFromBody(
   statusCode: number,
   statusMessage: string | undefined,
@@ -104,10 +131,14 @@ export function runtimeErrorFromBody(
         return error;
       }
     } catch {
-      const error = new Error(trimmed) as Error & {
+      const error = new Error(
+        messageFromNonJsonBody(statusCode, statusMessage, trimmed)
+      ) as Error & {
         status?: number;
+        body?: string;
       };
       error.status = statusCode;
+      error.body = trimmed;
       return error;
     }
   }

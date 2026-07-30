@@ -67,6 +67,36 @@ describe("runtimeErrorFromBody", () => {
     );
   });
 
+  it("keeps a gateway's HTML page out of the message", () => {
+    const page = [
+      "<!DOCTYPE html><html><head>",
+      "<title>imerchstaging.com | 502: Bad gateway</title>",
+      '<meta charset="UTF-8" />',
+      "</head><body><h1>Bad gateway</h1>",
+      "<p>The web server reported a bad gateway error.</p>",
+      "</body></html>",
+    ].join("");
+    const err = runtimeErrorFromBody(502, "Bad Gateway", page) as Error & {
+      body?: string;
+    };
+    expect(err.message).toBe("imerchstaging.com | 502: Bad gateway");
+    // The page itself is still there for whoever is reading logs.
+    expect(err.body).toBe(page);
+  });
+
+  it("falls back to the status when an HTML page has no title", () => {
+    expect(
+      runtimeErrorFromBody(502, "Bad Gateway", "<html><body>nope</body></html>")
+        .message
+    ).toBe("502 Bad Gateway");
+  });
+
+  it("truncates a long plain-text body", () => {
+    const message = runtimeErrorFromBody(500, "Server", "x".repeat(500)).message;
+    expect(message.length).toBeLessThanOrEqual(201);
+    expect(message.endsWith("\u2026")).toBe(true);
+  });
+
   it("attaches numeric status to thrown error", () => {
     const err = runtimeErrorFromBody(404, "Not Found", '{"detail":"missing"}') as Error & {
       status?: number;
