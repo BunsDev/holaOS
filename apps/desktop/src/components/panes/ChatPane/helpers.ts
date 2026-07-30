@@ -276,8 +276,31 @@ export function historyMessagesInDisplayOrder(
   return order === "desc" ? [...messages].reverse() : messages;
 }
 
+const IPC_WRAPPER = /^Error invoking remote method '[^']+': (?:Error: )?([\s\S]+)$/;
+const HTML_BODY = /^\s*<(?:!doctype\b|html\b)/i;
+const HTML_TITLE = /<title[^>]*>([\s\S]*?)<\/title>/i;
+const MAX_ERROR_CHARS = 300;
+
+/**
+ * What a person should see when something failed. Two things reach here that
+ * are not theirs to read: Electron wraps every main-process rejection in
+ * "Error invoking remote method '<channel>': Error: …", naming an IPC channel
+ * they have never heard of; and a failure upstream of our API can arrive as a
+ * whole HTML page, which then renders as a wall of markup.
+ */
 export function normalizeErrorMessage(error: unknown) {
-  return error instanceof Error ? error.message : "Request failed.";
+  const raw = error instanceof Error ? error.message : "";
+  const message = (raw.match(IPC_WRAPPER)?.[1] ?? raw).trim();
+  if (!message) {
+    return "Request failed.";
+  }
+  if (HTML_BODY.test(message)) {
+    // A gateway page's <title> is its one human line ("… | 502: Bad gateway").
+    return message.match(HTML_TITLE)?.[1]?.trim() || "Request failed.";
+  }
+  return message.length > MAX_ERROR_CHARS
+    ? `${message.slice(0, MAX_ERROR_CHARS).trimEnd()}\u2026`
+    : message;
 }
 
 export function turnInputIdsFromHistoryMessages(

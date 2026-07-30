@@ -209,6 +209,7 @@ import {
   inputIdFromMessageId,
   inputIdFromHistoryMessage,
   historyMessagesInDisplayOrder,
+  normalizeErrorMessage,
   turnInputIdsFromHistoryMessages,
 } from "./helpers";
 import { HistoryRestoreSkeleton } from "./skeletons";
@@ -354,10 +355,6 @@ function runtimeModelHasChatCapability(model: RuntimeProviderModelPayload) {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
-function normalizeErrorMessage(error: unknown) {
-  return error instanceof Error ? error.message : "Request failed.";
 }
 
 // True when the DataTransfer carries something the chat composer would

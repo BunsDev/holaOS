@@ -9,11 +9,14 @@ import { useOpenDiscover } from "@/components/layout/shell/useOpenDiscover";
 import { useShareToHolahub } from "@/components/layout/shell/useShareToHolahub";
 import { useAtomValue } from "jotai";
 import {
+  enrichOutputs,
   gatherShareAttributionItems,
   resolveOutputModel,
   gatherShareImages,
+  mergeOutputsByPath,
   gatherShareVideos,
   isShareableMediaOutput,
+  outputRecordsForTurns,
 } from "./shareCapture";
 import type {
   ChatAssistantSegment,
@@ -436,24 +439,27 @@ function AssistantTurnComponent({
                 hasFileEdits={hasFileEdits}
                 onShareToHolahub={
                   hasShareMediaOutput && discoverEnabled
-                    ? () => {
-                        Promise.all([
-                          gatherShareImages(outputs, workspaceId),
-                          gatherShareVideos(outputs, workspaceId),
-                        ]).then(([images, videos]) =>
-                          shareToHolahub({
-                            sourceText: copyText,
-                            images,
-                            videos,
-                            items: gatherShareAttributionItems(outputs),
-                            form: "output",
-                            recipe: {
-                              prompt: "",
-                              model: "",
-                              outputModel: resolveOutputModel(outputs),
-                            },
-                          })
+                    ? async () => {
+                        const ready = enrichOutputs(
+                          mergeOutputsByPath(outputs),
+                          await outputRecordsForTurns(workspaceId, outputs)
                         );
+                        const [images, videos] = await Promise.all([
+                          gatherShareImages(ready, workspaceId),
+                          gatherShareVideos(ready, workspaceId),
+                        ]);
+                        await shareToHolahub({
+                          sourceText: copyText,
+                          images,
+                          videos,
+                          items: gatherShareAttributionItems(ready),
+                          form: "output",
+                          recipe: {
+                            prompt: "",
+                            model: "",
+                            outputModel: resolveOutputModel(ready),
+                          },
+                        });
                       }
                     : undefined
                 }

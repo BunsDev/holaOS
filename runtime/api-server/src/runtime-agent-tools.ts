@@ -6406,6 +6406,51 @@ export class RuntimeAgentToolsService {
     };
   }
 
+  /** What an earlier record of the same file already knows about how it was
+   *  made. Only the generation keys — the delivery record keeps its own identity. */
+  private generationMetadataFor(
+    workspaceId: string,
+    inputId: string | null,
+    filePath: string
+  ): Record<string, unknown> {
+    if (!inputId) {
+      return {};
+    }
+    const GENERATION_KEYS = [
+      "prompt",
+      "revised_prompt",
+      "model",
+      "model_id",
+      "provider",
+      "image_size",
+      "video_size",
+      "video_seconds",
+      "category",
+      "artifact_type",
+    ];
+    try {
+      const prior = this.store.listOutputs({ workspaceId, inputId, limit: 50 });
+      for (const record of prior) {
+        if (record.filePath !== filePath || !record.metadata) {
+          continue;
+        }
+        const meta = record.metadata as Record<string, unknown>;
+        const carried: Record<string, unknown> = {};
+        for (const key of GENERATION_KEYS) {
+          if (meta[key] !== undefined && meta[key] !== null) {
+            carried[key] = meta[key];
+          }
+        }
+        if (Object.keys(carried).length > 0) {
+          return carried;
+        }
+      }
+    } catch {
+      // A lookup failure must never stop a file from being delivered.
+    }
+    return {};
+  }
+
   /**
    * Deliver an EXISTING file to the user by registering it as this turn's output
    * (so channel egress / the chat sends it as an attachment). Unlike write_report
@@ -6437,6 +6482,7 @@ export class RuntimeAgentToolsService {
       throw new RuntimeAgentToolsServiceError(400, "send_file_not_a_file", `not a file: ${rawPath}`);
     }
     const title = path.basename(absolutePath);
+    const inputId = normalizedString(params.inputId) || null;
     const output = this.store.createOutput({
       workspaceId: params.workspaceId,
       outputType: "file",
@@ -6444,9 +6490,13 @@ export class RuntimeAgentToolsService {
       status: "completed",
       filePath: absolutePath,
       sessionId: sessionId || null,
-      inputId: normalizedString(params.inputId) || null,
+      inputId,
       artifactId: randomUUID(),
       metadata: {
+        // Delivering a generated file writes a second record for it, and this
+        // one describes the delivery. Carry the generation forward or the last
+        // record wins downstream and the artifact reads as having no prompt.
+        ...this.generationMetadataFor(params.workspaceId, inputId, absolutePath),
         origin_type: "runtime_tool",
         change_type: "delivered",
         tool_id: "send_file",
