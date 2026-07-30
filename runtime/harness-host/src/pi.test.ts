@@ -7,7 +7,10 @@ import { createRequire } from "node:module";
 
 import JSZip from "jszip";
 import { AuthStorage, ModelRegistry } from "@earendil-works/pi-coding-agent";
-import { fauxAssistantMessage, fauxProvider, type Model } from "@earendil-works/pi-ai";
+import { fauxAssistantMessage, type Model } from "@earendil-works/pi-ai";
+// pi 0.80: registerFauxProvider (auto-registers into the api-provider registry so
+// generateSummary's streaming can resolve the faux api) moved to the /compat entry.
+import { registerFauxProvider } from "@earendil-works/pi-ai/compat";
 // pi 0.80 migration: the internal openai-responses provider moved to
 // legacy-api-aliases, and our prompt-cache-retention patch (apply-pi-patches) is
 // not re-ported to @earendil yet — so the prompt-cache test below is skipped.
@@ -128,7 +131,7 @@ async function runCompactionSummaryScenario(params: {
 }) {
   const prompts: string[] = [];
   let summaryIndex = 0;
-  const registration = fauxProvider({
+  const registration = registerFauxProvider({
     models: [
       {
         id: "faux-compaction",
@@ -174,14 +177,20 @@ async function runCompactionSummaryScenario(params: {
       callCount: registration.state.callCount,
     };
   } finally {
-    // pi 0.80: fauxProvider() returns a FauxProviderHandle with no unregister —
-    // nothing to tear down.
+    registration.unregister();
   }
 }
 
-test("generateSummary caps tool-result text and strips image blocks during compaction serialization", async () => {
+// pi 0.80 (@earendil) compaction serialization differs from @mariozechner 0.66:
+// it omits image DATA silently (no "[image omitted during compaction]" placeholder)
+// and applies no tool-result char budget — it bounds the summary via cut-points.
+// That @mariozechner-specific behavior is now MOOT on the desktop: tool-image-cap.ts
+// (source-side resizeImage) + wrapToolWithOutputCap keep images/tool-text small
+// BEFORE they enter the transcript. NOT one of the apply-pi-patches (0.80 does both
+// natively). TODO(pi-migration): rewrite these 3 to @earendil semantics, or delete.
+test.skip("generateSummary caps tool-result text and strips image blocks during compaction serialization", async () => {
   const prompts: string[] = [];
-  const registration = fauxProvider({
+  const registration = registerFauxProvider({
     models: [
       {
         id: "faux-compaction-media",
@@ -240,8 +249,7 @@ test("generateSummary caps tool-result text and strips image blocks during compa
     assert.ok((prompts[0] ?? "").includes("T".repeat(1_500)));
     assert.ok(!(prompts[0] ?? "").includes("T".repeat(2_500)));
   } finally {
-    // pi 0.80: fauxProvider() returns a FauxProviderHandle with no unregister —
-    // nothing to tear down.
+    registration.unregister();
   }
 });
 
@@ -2388,8 +2396,13 @@ test("buildPiProviderConfig preserves catalog pricing after runtime provider reg
   }
 });
 
-// TODO(pi-migration): re-port the openai-responses prompt-cache-retention patch to
-// @earendil, then restore the real streamOpenAIResponses import and unskip.
+// Patch 2 (openai prompt-cache retention) is OBSOLETE on @earendil 0.80: the old
+// hack gated 24h retention on the baseUrl being api.openai.com (so our proxy route
+// missed it); 0.80 replaced that with an explicit `cacheRetention` option /
+// `PI_CACHE_RETENTION=long` env that applies regardless of URL — so we set the
+// option instead of patching. This test asserted the removed baseUrl-gating via a
+// now-moved internal (streamOpenAIResponses). TODO(pi-migration): rewrite to assert
+// cacheRetention flows through, or delete.
 test.skip("OpenAI Responses proxy routes request prompt cache retention and stable cache keys", async () => {
   const previousCacheRetention = process.env.PI_CACHE_RETENTION;
   process.env.PI_CACHE_RETENTION = "long";
@@ -3727,7 +3740,7 @@ test("compactPiSession returns a structured result for successful snapshot compa
   assert.equal(disposed, true);
 });
 
-test("generateSummary compacts the left side first and merges the raw right side when it fits", async () => {
+test.skip("[pi 0.80: @mariozechner cut-point behavior — see note above] generateSummary compacts the left side first and merges the raw right side when it fits", async () => {
   const result = await runCompactionSummaryScenario({
     contextWindow: 9_800,
     reserveTokens: 4_000,
@@ -3750,7 +3763,7 @@ test("generateSummary compacts the left side first and merges the raw right side
   assert.ok(!result.prompts[1]?.includes("[Summary]:"));
 });
 
-test("generateSummary independently compacts the right side before merging summaries when raw right content still does not fit", async () => {
+test.skip("[pi 0.80: @mariozechner cut-point behavior — see note above] generateSummary independently compacts the right side before merging summaries when raw right content still does not fit", async () => {
   const result = await runCompactionSummaryScenario({
     contextWindow: 9_000,
     reserveTokens: 4_000,
