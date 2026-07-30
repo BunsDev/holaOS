@@ -1,5 +1,6 @@
 import type {
   ShareDraftFile,
+  ShareDraftGeneration,
   ShareDraftImage,
   ShareDraftItem,
   ShareDraftSessionStep,
@@ -88,6 +89,7 @@ export async function gatherShareImages(
       images.push({
         dataBase64: bytesToBase64(bytes),
         contentType: SHARE_IMAGE_MIME[ext],
+        ...(generationOf(output) ? { generation: generationOf(output) } : {}),
       });
     } catch {
       // Unreadable output — skip it.
@@ -119,7 +121,11 @@ export async function gatherShareVideos(
         continue;
       }
       return [
-        { dataBase64: bytesToBase64(bytes), contentType: SHARE_VIDEO_MIME[ext] },
+        {
+          dataBase64: bytesToBase64(bytes),
+          contentType: SHARE_VIDEO_MIME[ext],
+          ...(generationOf(output) ? { generation: generationOf(output) } : {}),
+        },
       ];
     } catch {
       // Unreadable — try the next output.
@@ -399,6 +405,33 @@ export function gatherQuotedToolItems(
     }
   }
   return items;
+}
+
+const nonEmpty = (value: unknown): string | undefined =>
+  typeof value === "string" && value.trim() ? value.trim() : undefined;
+
+/** The generation behind one artifact, off the metadata the runtime stamped.
+ *  Undefined when the producing tool recorded none — a file the end-of-turn scan
+ *  merely noticed has no generation to report. */
+function generationOf(
+  output: ShareableOutput
+): ShareDraftGeneration | undefined {
+  const meta = output.metadata;
+  if (!meta) {
+    return undefined;
+  }
+  const generation: ShareDraftGeneration = {
+    prompt: nonEmpty(meta.prompt),
+    revisedPrompt: nonEmpty(meta.revised_prompt),
+    model: nonEmpty(meta.model) ?? nonEmpty(meta.model_id),
+    provider: nonEmpty(meta.provider),
+    size: nonEmpty(meta.image_size) ?? nonEmpty(meta.video_size),
+    seconds:
+      typeof meta.video_seconds === "number" ? meta.video_seconds : undefined,
+  };
+  return Object.values(generation).some((v) => v !== undefined)
+    ? generation
+    : undefined;
 }
 
 /**
