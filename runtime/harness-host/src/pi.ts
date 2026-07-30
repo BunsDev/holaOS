@@ -2528,7 +2528,7 @@ function resolvePiModelProfile(request: HarnessHostPiRequest) {
   });
 }
 
-function configurePiPromptCacheRetention(request: HarnessHostPiRequest): () => void {
+export function configurePiPromptCacheRetention(request: HarnessHostPiRequest): () => void {
   if (resolvePiModelProfile(request).api !== "openai-responses") {
     return () => {};
   }
