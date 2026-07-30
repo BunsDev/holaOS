@@ -6,10 +6,10 @@ import test from "node:test";
 import { createRequire } from "node:module";
 
 import JSZip from "jszip";
-import { AuthStorage, ModelRegistry } from "@mariozechner/pi-coding-agent";
-import { fauxAssistantMessage, registerFauxProvider, type Model } from "@mariozechner/pi-ai";
-import { streamOpenAIResponses } from "../node_modules/@mariozechner/pi-ai/dist/providers/openai-responses.js";
-import { generateSummary } from "../node_modules/@mariozechner/pi-coding-agent/dist/core/compaction/compaction.js";
+import { AuthStorage, ModelRegistry } from "@earendil-works/pi-coding-agent";
+import { fauxAssistantMessage, registerFauxProvider, type Model } from "@earendil-works/pi-ai";
+import { streamOpenAIResponses } from "../node_modules/@earendil-works/pi-ai/dist/providers/openai-responses.js";
+import { generateSummary } from "../node_modules/@earendil-works/pi-coding-agent/dist/core/compaction/compaction.js";
 import { createHarnessSkillWideningState } from "../../harnesses/src/index.js";
 
 import type { HarnessHostPiRequest } from "./contracts.js";

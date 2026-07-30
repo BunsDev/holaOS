@@ -21,9 +21,9 @@ import {
   type LoadSkillsResult,
   type Skill,
   type ToolDefinition,
-} from "@mariozechner/pi-coding-agent";
-import type { ImageContent, TextContent } from "@mariozechner/pi-ai";
-import type { ResourceDiagnostic } from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-coding-agent";
+import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
+import type { ResourceDiagnostic } from "@earendil-works/pi-coding-agent";
 import { APIError as OpenAIApiError } from "openai";
 import { createCallResult, createRuntime, type Runtime as McporterRuntime, type ServerDefinition } from "mcporter";
 import {
@@ -32,7 +32,7 @@ import {
   readPiMcpToolCache,
   writePiMcpToolCache,
 } from "./pi-mcp-tool-cache.js";
-import { MODELS } from "../node_modules/@mariozechner/pi-ai/dist/models.generated.js";
+import { MODELS } from "../node_modules/@earendil-works/pi-ai/dist/models.generated.js";
 import {
   DEFAULT_HARNESS_MAX_EXCERPT_LINES,
   DEFAULT_HARNESS_MAX_INLINE_IMAGE_BYTES,
@@ -1084,7 +1084,7 @@ async function loadPrepareCompactionFn():
   }
   cachedPrepareCompactionFnPromise = (async () => {
     try {
-      const packageEntry = require.resolve("@mariozechner/pi-coding-agent");
+      const packageEntry = require.resolve("@earendil-works/pi-coding-agent");
       const modulePath = path.join(
         path.dirname(packageEntry),
         "core",
@@ -3093,7 +3093,7 @@ function normalizeAssistantFailureMessage(errorMessage: unknown, content: unknow
 
 /** Mirrors `pi-coding-agent`'s `_isRetryableError` regex so the mapper
  *  defers terminal failure for exactly the cases pi will internally
- *  retry. Source: `@mariozechner/pi-coding-agent/dist/core/agent-session.js`
+ *  retry. Source: `@earendil-works/pi-coding-agent/dist/core/agent-session.js`
  *  `_isRetryableError`. Keep in sync on pi upgrades. */
 function isPiRetryableErrorMessage(message: string | null | undefined): boolean {
   if (!message) return false;

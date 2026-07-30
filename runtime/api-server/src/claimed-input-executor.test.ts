@@ -49,7 +49,7 @@ const ORIGINAL_ENV = {
 };
 const require = createRequire(import.meta.url);
 const PI_PACKAGE_ENTRY_PATH = fileURLToPath(
-  import.meta.resolve("@mariozechner/pi-coding-agent"),
+  import.meta.resolve("@earendil-works/pi-coding-agent"),
 );
 const PI_SESSION_MANAGER_MODULE_PATH = path.join(
   path.dirname(PI_PACKAGE_ENTRY_PATH),

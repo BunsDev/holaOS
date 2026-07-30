@@ -93,7 +93,7 @@ const CONTEXT_BUDGET_COMPACTION_EVENT_TYPES = new Set([
   "compaction_restored",
 ]);
 const PI_PACKAGE_ENTRY_PATH = fileURLToPath(
-  import.meta.resolve("@mariozechner/pi-coding-agent"),
+  import.meta.resolve("@earendil-works/pi-coding-agent"),
 );
 const PI_SESSION_MANAGER_MODULE_PATH = path.join(
   path.dirname(PI_PACKAGE_ENTRY_PATH),
