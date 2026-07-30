@@ -21,9 +21,9 @@ import {
   type LoadSkillsResult,
   type Skill,
   type ToolDefinition,
-} from "@mariozechner/pi-coding-agent";
-import type { ImageContent, TextContent } from "@mariozechner/pi-ai";
-import type { ResourceDiagnostic } from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-coding-agent";
+import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
+import type { ResourceDiagnostic } from "@earendil-works/pi-coding-agent";
 import { APIError as OpenAIApiError } from "openai";
 import { createCallResult, createRuntime, type Runtime as McporterRuntime, type ServerDefinition } from "mcporter";
 import {
@@ -32,7 +32,7 @@ import {
   readPiMcpToolCache,
   writePiMcpToolCache,
 } from "./pi-mcp-tool-cache.js";
-import { MODELS } from "../node_modules/@mariozechner/pi-ai/dist/models.generated.js";
+import { MODELS } from "../node_modules/@earendil-works/pi-ai/dist/models.generated.js";
 import {
   DEFAULT_HARNESS_MAX_EXCERPT_LINES,
   DEFAULT_HARNESS_MAX_INLINE_IMAGE_BYTES,
@@ -111,6 +111,7 @@ import {
 import { createPiFindToolDefinition } from "./pi-find-tool.js";
 import { createPiDocumentReadToolDefinitions } from "./pi-document-read-tool.js";
 import { downscaleInlineImage } from "./image-downscale.js";
+import { wrapToolWithImageCap } from "./tool-image-cap.js";
 import { createPiSearchToolDefinition } from "./pi-search-tool.js";
 import { installBenignStdioEpipeGuard } from "./stdio-epipe.js";
 import {
@@ -1085,7 +1086,7 @@ async function loadPrepareCompactionFn():
   }
   cachedPrepareCompactionFnPromise = (async () => {
     try {
-      const packageEntry = require.resolve("@mariozechner/pi-coding-agent");
+      const packageEntry = require.resolve("@earendil-works/pi-coding-agent");
       const modulePath = path.join(
         path.dirname(packageEntry),
         "core",
@@ -2660,7 +2661,7 @@ function resolvePiModelProfile(request: HarnessHostPiRequest) {
   });
 }
 
-function configurePiPromptCacheRetention(request: HarnessHostPiRequest): () => void {
+export function configurePiPromptCacheRetention(request: HarnessHostPiRequest): () => void {
   if (resolvePiModelProfile(request).api !== "openai-responses") {
     return () => {};
   }
@@ -2997,9 +2998,12 @@ async function defaultCreateSession(request: HarnessHostPiRequest): Promise<PiSe
   // piling onto the context (bounds long browser/tool-heavy sessions).
   const toolOutputCapState = createToolOutputCapState();
   const tools = baseTools.map((tool) =>
-    // Outermost: downscale any inline images the tool returns before they reach
-    // the context, so an image-heavy turn stays under the provider size limit.
-    wrapToolWithImageDownscale(
+    // Outermost: downscale any inline images the tool returns (in-process via
+    // @napi-rs/canvas) before they reach the model, so an image-heavy turn stays
+    // under the provider request-size limit. A cumulative backstop lives in
+    // capSessionImageContext, which evicts older images once the session's image
+    // bytes exceed the budget.
+    wrapToolWithImageCap(
       // One wall-clock deadline over the whole tool-call chain, so a runaway
       // `bash` (e.g. `find /`) can't freeze the session for hours.
       wrapToolWithTimeout(
@@ -3018,9 +3022,9 @@ async function defaultCreateSession(request: HarnessHostPiRequest): Promise<PiSe
   );
   const customTools = [
     ...nonSkillCustomTools.map((tool) =>
-      // Browser screenshots and read-in images flow through here — downscale
-      // them at the source so the within-turn requests stay sendable.
-      wrapToolWithImageDownscale(
+      // Browser screenshots + read-in images flow through here — downscale at
+      // the source so the within-turn requests stay sendable.
+      wrapToolWithImageCap(
         wrapToolWithTimeout(
           wrapToolWithOutputCap(
             wrapToolWithSkillWidening(tool, skillWideningState),
@@ -3031,7 +3035,7 @@ async function defaultCreateSession(request: HarnessHostPiRequest): Promise<PiSe
       )
     ),
     ...skillTools.map((tool) =>
-      wrapToolWithImageDownscale(
+      wrapToolWithImageCap(
         wrapToolWithTimeout(
           wrapToolWithOutputCap(
             tool,
@@ -3059,8 +3063,12 @@ async function defaultCreateSession(request: HarnessHostPiRequest): Promise<PiSe
         resourceLoader,
         sessionManager,
         settingsManager,
-        tools,
-        customTools,
+        // pi 0.80: `tools` is a name ALLOWLIST, not tool definitions. Disable pi's
+        // builtin read/bash/edit/write with `noTools: "builtin"` and pass ALL our
+        // tools — our own wrapped coding tools (createCodingTools minus read) plus
+        // the custom tools — through `customTools`. (0.66 → 0.80 break.)
+        noTools: "builtin",
+        customTools: [...tools, ...customTools],
       })
     ));
   } catch (error) {
@@ -3236,11 +3244,18 @@ function normalizeAssistantFailureMessage(errorMessage: unknown, content: unknow
 
 /** Mirrors `pi-coding-agent`'s `_isRetryableError` regex so the mapper
  *  defers terminal failure for exactly the cases pi will internally
- *  retry. Source: `@mariozechner/pi-coding-agent/dist/core/agent-session.js`
- *  `_isRetryableError`. Keep in sync on pi upgrades. */
+ *  retry. Source: `@earendil-works/pi-coding-agent/dist/core/agent-session.js`
+ *  `_isRetryableError`. Keep in sync on pi upgrades.
+ *
+ *  Synced to @earendil 0.80.2: added `stream ended before message_stop`,
+ *  `http2 request did not get a response`, `connection lost`, and
+ *  `websocket closed/error`. The first is the key one — a transient mid-stream
+ *  drop the library DOES retry, but which the pre-migration regex didn't match,
+ *  so the mapper promoted run_failed and tore the harness down before pi's retry
+ *  could run (an otherwise-recoverable turn hard-failed). */
 function isPiRetryableErrorMessage(message: string | null | undefined): boolean {
   if (!message) return false;
-  return /overloaded|provider.?returned.?error|rate.?limit|too many requests|429|499|500|502|503|504|service.?unavailable|server.?error|internal.?error|network.?error|connection.?error|connection.?refused|other side closed|fetch failed|upstream.?connect|reset before headers|socket hang up|ended without|stream.?closed|timed? out|timeout|terminated|retry delay/i.test(
+  return /overloaded|provider.?returned.?error|rate.?limit|too many requests|429|499|500|502|503|504|service.?unavailable|server.?error|internal.?error|network.?error|connection.?error|connection.?refused|connection.?lost|websocket.?closed|websocket.?error|other side closed|fetch failed|upstream.?connect|reset before headers|socket hang up|ended without|stream.?closed|stream ended before message_stop|http2 request did not get a response|timed? out|timeout|terminated|retry delay/i.test(
     message
   );
 }

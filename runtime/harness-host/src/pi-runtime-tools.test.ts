@@ -252,10 +252,10 @@ test("Pi runtime subagent tools normalize delegated task bodies and control rout
   assert.ok(replyTaskTool);
   assert.ok(cancelTaskTool);
   assert.ok(rerunTaskTool);
-  assert.deepEqual(delegateTool.parameters.required, ["tasks"]);
+  assert.deepEqual((delegateTool.parameters as any).required, ["tasks"]);
   assert.deepEqual(
     (
-      delegateTool.parameters.properties.tasks as {
+      (delegateTool.parameters as any).properties.tasks as {
         items?: { properties?: Record<string, unknown>; required?: string[] };
       }
     ).items?.required,
