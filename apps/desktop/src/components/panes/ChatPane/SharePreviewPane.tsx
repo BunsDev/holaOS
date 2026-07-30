@@ -17,8 +17,10 @@ import { AssistantTurn } from "./AssistantTurn";
 import {
   gatherSessionSnapshot,
   gatherQuotedToolItems,
+  describeSkipped,
   gatherShareAttributionItems,
   resolveOutputModel,
+  type SkippedArtifact,
   resolveRecipePrompt,
   turnsForOutputs,
   gatherShareFiles,
@@ -108,6 +110,7 @@ export function SharePreviewPane() {
   const [includeModel, setIncludeModel] = useState(true);
   const [caption, setCaption] = useState("");
   const [posting, setPosting] = useState(false);
+  const [shareError, setShareError] = useState("");
 
   const close = () => setOverlay(null);
   const toggleTurn = (id: string) =>
@@ -180,14 +183,22 @@ export function SharePreviewPane() {
     if (!payload) {
       return;
     }
+    // Collect what had to be left behind, so a share with nothing left to send
+    // can say why instead of leaving the button looking broken.
+    const skipped: SkippedArtifact[] = [];
     const [images, videos, files] = await Promise.all([
-      gatherShareImages(chosenOutputs, payload.workspaceId),
+      gatherShareImages(chosenOutputs, payload.workspaceId, skipped),
       gatherShareVideos(chosenOutputs, payload.workspaceId),
       gatherShareFiles(chosenOutputs, payload.workspaceId),
     ]);
     if (images.length === 0 && videos.length === 0 && files.length === 0) {
+      setShareError(
+        describeSkipped(skipped) ||
+          "Nothing in this selection could be shared."
+      );
       return;
     }
+    setShareError("");
     // Seed the apps that made these outputs; the user adds any skills/MCPs in the
     // composer's attach picker next.
     const sourceTurns = turnsForOutputs(chosenOutputs, messages);
@@ -295,6 +306,12 @@ export function SharePreviewPane() {
             : `${selectedTurns.length}/${turns.length} turns`}
         </span>
         <div className="ml-auto flex items-center gap-2">
+          {/* Beside the button that did nothing, which is where someone looks. */}
+          {shareError ? (
+            <span className="max-w-[26rem] text-right text-[12px] text-destructive">
+              {shareError}
+            </span>
+          ) : null}
           {effectiveMode === "conversation" && model ? (
             <Button
               onClick={() => setIncludeModel((v) => !v)}

@@ -65,13 +65,41 @@ function bytesToBase64(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
+/** What a capture had to leave behind, so the caller can say so. A share that
+ *  silently drops an artifact is indistinguishable from a broken button. */
+export type SkippedArtifact = {
+  name: string;
+  reason: "too-large" | "unreadable" | "no-workspace";
+};
+
+export function describeSkipped(skipped: SkippedArtifact[]): string {
+  if (skipped.length === 0) {
+    return "";
+  }
+  if (skipped.some((s) => s.reason === "no-workspace")) {
+    return "This chat has no workspace, so its files can't be read.";
+  }
+  const tooLarge = skipped.filter((s) => s.reason === "too-large");
+  if (tooLarge.length === skipped.length) {
+    const limit = Math.round(MAX_SHARE_IMAGE_BYTES / (1024 * 1024));
+    return skipped.length === 1
+      ? `${tooLarge[0].name} is over the ${limit}MB limit for a shared image.`
+      : `${skipped.length} artifacts are over the ${limit}MB limit for a shared image.`;
+  }
+  return skipped.length === 1
+    ? `${skipped[0].name} could not be read.`
+    : `${skipped.length} artifacts could not be included.`;
+}
+
 // Capture generated image outputs (by file extension) as base64 so the HolaHub
 // composer — which holds the session — can upload them on prefill.
 export async function gatherShareImages(
   outputs: ShareableOutput[],
-  workspaceId: string | null
+  workspaceId: string | null,
+  skipped?: SkippedArtifact[]
 ): Promise<ShareDraftImage[]> {
   if (!workspaceId) {
+    skipped?.push({ name: "", reason: "no-workspace" });
     return [];
   }
   const images: ShareDraftImage[] = [];
@@ -84,6 +112,7 @@ export async function gatherShareImages(
     try {
       const bytes = await window.electronAPI.fs.readFileBytes(path, workspaceId);
       if (bytes.length === 0 || bytes.length > MAX_SHARE_IMAGE_BYTES) {
+        skipped?.push({ name: baseName(path), reason: "too-large" });
         continue;
       }
       images.push({
@@ -92,7 +121,7 @@ export async function gatherShareImages(
         ...(generationOf(output) ? { generation: generationOf(output) } : {}),
       });
     } catch {
-      // Unreadable output — skip it.
+      skipped?.push({ name: baseName(path), reason: "unreadable" });
     }
     if (images.length >= MAX_SHARE_IMAGES) {
       break;
