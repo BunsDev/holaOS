@@ -6,6 +6,7 @@ import type {
   ShareDraftSessionStep,
   ShareDraftSessionTurn,
 } from "@holaboss/app-host/protocol";
+import { remoteApi } from "@/lib/remoteApiClient";
 import { toolkitDisplayName } from "@/lib/toolkitDisplay";
 import { parseSerializedQuotedSkillPrompt } from "../helpers";
 import type { ChatExecutionTimelineItem, ChatMessage } from "../types";
@@ -563,6 +564,64 @@ export function mergeOutputsByPath(
   return order.flatMap((key) => {
     const output = byPath.get(key);
     return output ? [output] : [];
+  });
+}
+
+/** Every record the runtime holds for these turns — including the ones the chat
+ *  never rendered. Best-effort: a share must not fail because a lookup did. */
+export async function outputRecordsForTurns(
+  workspaceId: string | null,
+  outputs: ShareableOutput[]
+): Promise<ShareableOutput[]> {
+  const inputIds = [
+    ...new Set(
+      outputs.flatMap((o) => (o.input_id ? [o.input_id] : []))
+    ),
+  ];
+  if (!workspaceId || inputIds.length === 0) {
+    return [];
+  }
+  const batches = await Promise.all(
+    inputIds.map((inputId) =>
+      remoteApi.outputs
+        .list({ workspaceId, inputId, limit: 50 })
+        .then((r) => r.items as ShareableOutput[])
+        .catch(() => [] as ShareableOutput[])
+    )
+  );
+  return batches.flat();
+}
+
+/**
+ * Fill each output's metadata gaps from any other record of the same file.
+ *
+ * The chat renders what the agent *delivered*, and a delivery record describes
+ * the delivery — the record that knows the prompt is the one `image_generate`
+ * wrote, which the turn never renders. Same file, same turn, two rows; without
+ * this the share reads the wrong one and reports no generation at all.
+ *
+ * Adds nothing: the result is exactly the outputs passed in.
+ */
+export function enrichOutputs(
+  outputs: ShareableOutput[],
+  pool: ShareableOutput[]
+): ShareableOutput[] {
+  if (pool.length === 0) {
+    return outputs;
+  }
+  const byPath = new Map<string, Record<string, unknown>>();
+  for (const candidate of pool) {
+    const key = candidate.file_path;
+    if (!(key && candidate.metadata)) {
+      continue;
+    }
+    byPath.set(key, { ...candidate.metadata, ...(byPath.get(key) ?? {}) });
+  }
+  return outputs.map((output) => {
+    const extra = output.file_path ? byPath.get(output.file_path) : undefined;
+    return extra
+      ? { ...output, metadata: { ...extra, ...(output.metadata ?? {}) } }
+      : output;
   });
 }
 

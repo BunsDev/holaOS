@@ -28,7 +28,9 @@ import {
   gatherShareVideos,
   isShareableDocOutput,
   isShareableMediaOutput,
+  enrichOutputs,
   mergeOutputsByPath,
+  outputRecordsForTurns,
   type ShareableOutput,
   visibleText,
 } from "./AssistantTurn/shareCapture";
@@ -189,10 +191,16 @@ export function SharePreviewPane() {
     // Collect what had to be left behind, so a share with nothing left to send
     // can say why instead of leaving the button looking broken.
     const skipped: SkippedArtifact[] = [];
+    // The chat renders what was delivered; the record that knows the prompt is
+    // the one the generating tool wrote, which never reaches a turn.
+    const ready = enrichOutputs(
+      chosenOutputs,
+      await outputRecordsForTurns(payload.workspaceId, chosenOutputs)
+    );
     const [images, videos, files] = await Promise.all([
-      gatherShareImages(chosenOutputs, payload.workspaceId, skipped),
-      gatherShareVideos(chosenOutputs, payload.workspaceId),
-      gatherShareFiles(chosenOutputs, payload.workspaceId),
+      gatherShareImages(ready, payload.workspaceId, skipped),
+      gatherShareVideos(ready, payload.workspaceId),
+      gatherShareFiles(ready, payload.workspaceId),
     ]);
     if (images.length === 0 && videos.length === 0 && files.length === 0) {
       setShareError(
@@ -207,13 +215,13 @@ export function SharePreviewPane() {
     const sourceTurns = turnsForOutputs(chosenOutputs, messages);
     const items = [
       ...gatherQuotedToolItems(sourceTurns, toolNames),
-      ...gatherShareAttributionItems(chosenOutputs),
+      ...gatherShareAttributionItems(ready),
     ];
     // What a viewer reproduces from: the ask that produced these artifacts.
     const recipe = {
       prompt: resolveRecipePrompt(chosenOutputs, messages),
       model: payload.modelId ?? "",
-      outputModel: resolveOutputModel(chosenOutputs),
+      outputModel: resolveOutputModel(ready),
     };
     // Hidden context so the composer's "Draft with AI" can caption the artifact
     // from what the assistant said while making it.
