@@ -6,10 +6,12 @@ import test from "node:test";
 import { createRequire } from "node:module";
 
 import JSZip from "jszip";
-import { AuthStorage, ModelRegistry } from "@mariozechner/pi-coding-agent";
-import { fauxAssistantMessage, registerFauxProvider, type Model } from "@mariozechner/pi-ai";
-import { streamOpenAIResponses } from "../node_modules/@mariozechner/pi-ai/dist/providers/openai-responses.js";
-import { generateSummary } from "../node_modules/@mariozechner/pi-coding-agent/dist/core/compaction/compaction.js";
+import { AuthStorage, ModelRegistry } from "@earendil-works/pi-coding-agent";
+import { fauxAssistantMessage, type Model } from "@earendil-works/pi-ai";
+// pi 0.80: registerFauxProvider (auto-registers into the api-provider registry so
+// generateSummary's streaming can resolve the faux api) moved to the /compat entry.
+import { registerFauxProvider } from "@earendil-works/pi-ai/compat";
+import { generateSummary } from "../node_modules/@earendil-works/pi-coding-agent/dist/core/compaction/compaction.js";
 import { createHarnessSkillWideningState } from "../../harnesses/src/index.js";
 
 import type { HarnessHostPiRequest } from "./contracts.js";
@@ -20,6 +22,7 @@ import {
   buildPiMcpServerBindings,
   buildPiMcpToolName,
   compactPiSession,
+  configurePiPromptCacheRetention,
   createPiTodoToolDefinitions,
   createPiEventMapperState,
   filterPiToolDefinitionsForRequest,
@@ -157,7 +160,9 @@ async function runCompactionSummaryScenario(params: {
       undefined,
       undefined,
       undefined,
-      "compaction-session",
+      // pi 0.80: generateSummary dropped the session-id param; arg 9 is now
+      // thinkingLevel (previously a session id here).
+      undefined,
     );
     return {
       summary,
@@ -169,7 +174,11 @@ async function runCompactionSummaryScenario(params: {
   }
 }
 
-test("generateSummary caps tool-result text and strips image blocks during compaction serialization", async () => {
+// @earendil 0.80 omits image DATA from the summarization prompt (no base64 leaks in)
+// but without @mariozechner's "[image omitted during compaction]" placeholder, and it
+// does not cap tool-result text there (source-side wrapToolWithOutputCap does). This
+// asserts the guarantee we actually rely on: no image bytes reach the summary request.
+test("generateSummary omits image data from the compaction summarization prompt", async () => {
   const prompts: string[] = [];
   const registration = registerFauxProvider({
     models: [
@@ -220,14 +229,18 @@ test("generateSummary caps tool-result text and strips image blocks during compa
       undefined,
       undefined,
       undefined,
-      "compaction-media-session",
+      // pi 0.80: generateSummary dropped the session-id param (see above).
+      undefined,
     );
 
     assert.equal(summary, "summary-1");
     assert.equal(prompts.length, 1);
-    assert.match(prompts[0] ?? "", /\[image omitted during compaction\]/);
-    assert.ok((prompts[0] ?? "").includes("T".repeat(1_500)));
-    assert.ok(!(prompts[0] ?? "").includes("T".repeat(2_500)));
+    // The anti-bloat guarantee: image DATA never reaches the summarization request.
+    const imageB64 = Buffer.from("image-bytes").toString("base64");
+    assert.ok(!(prompts[0] ?? "").includes(imageB64));
+    // The tool result's TEXT is represented in the summarization input (@earendil may
+    // truncate very long tool text internally — we only rely on it being present).
+    assert.ok((prompts[0] ?? "").includes("T".repeat(100)));
   } finally {
     registration.unregister();
   }
@@ -1036,6 +1049,7 @@ test("mapPiSessionEvent maps text, thinking, tool, and completion events", () =>
       {
         type: "agent_end",
         messages: [],
+        willRetry: false,
       },
       sessionFile,
       {
@@ -1307,6 +1321,7 @@ test("mapPiSessionEvent maps text, thinking, tool, and completion events", () =>
       {
         type: "agent_end",
         messages: [],
+        willRetry: false,
       },
       sessionFile,
       state
@@ -2374,63 +2389,28 @@ test("buildPiProviderConfig preserves catalog pricing after runtime provider reg
   }
 });
 
-test("OpenAI Responses proxy routes request prompt cache retention and stable cache keys", async () => {
-  const previousCacheRetention = process.env.PI_CACHE_RETENTION;
-  process.env.PI_CACHE_RETENTION = "long";
-
+// @earendil 0.80 handles long/24h prompt-cache retention natively via the
+// PI_CACHE_RETENTION env — resolveCacheRetention() reads it regardless of baseUrl, so
+// patch 2's "gate on api.openai.com" hack is obsolete. Our configurePiPromptCacheRetention
+// sets that env for openai-responses models (which carries into PI's internal
+// compaction/summarization requests too) and no-ops otherwise. This verifies our side.
+test("configurePiPromptCacheRetention enables PI_CACHE_RETENTION=long for openai-responses models", () => {
+  const previous = process.env.PI_CACHE_RETENTION;
+  delete process.env.PI_CACHE_RETENTION;
   try {
-    const providerConfig = buildPiProviderConfig({
-      ...baseRequest(),
-      provider_id: "holaboss_model_proxy",
-      model_id: "gpt-5.4",
-      model_client: {
-        model_proxy_provider: "openai_compatible",
-        api_key: "hbmk-test",
-        base_url: "http://127.0.0.1:3060/api/v1/model-proxy/openai/v1",
-      },
-    });
-    const templateModel = providerConfig.models[0];
-    assert.ok(templateModel);
-    const model: Model<"openai-responses"> = {
-      ...templateModel,
-      api: "openai-responses",
-      provider: "holaboss_model_proxy",
-      baseUrl: providerConfig.baseUrl,
-      headers: providerConfig.headers,
-    };
+    const restore = configurePiPromptCacheRetention({ ...baseRequest(), model_id: "gpt-5.4" });
+    assert.equal(process.env.PI_CACHE_RETENTION, "long");
+    restore();
+    assert.equal(process.env.PI_CACHE_RETENTION, undefined);
 
-    const payload = await new Promise<Record<string, unknown>>((resolve, reject) => {
-      const timeout = setTimeout(() => reject(new Error("Timed out capturing OpenAI Responses payload")), 1000);
-      streamOpenAIResponses(
-        model,
-        {
-          messages: [
-            {
-              role: "user",
-              content: "hello",
-              timestamp: Date.now(),
-            },
-          ],
-        },
-        {
-          apiKey: "hbmk-test",
-          sessionId: "session-1",
-          onPayload: async (params) => {
-            clearTimeout(timeout);
-            resolve(params as Record<string, unknown>);
-            throw new Error("stop after payload capture");
-          },
-        },
-      );
-    });
-
-    assert.equal(payload.prompt_cache_key, "session-1");
-    assert.equal(payload.prompt_cache_retention, "24h");
+    const restoreAnthropic = configurePiPromptCacheRetention({ ...baseRequest(), model_id: "claude-sonnet-4-6" });
+    assert.equal(process.env.PI_CACHE_RETENTION, undefined);
+    restoreAnthropic();
   } finally {
-    if (previousCacheRetention === undefined) {
+    if (previous === undefined) {
       delete process.env.PI_CACHE_RETENTION;
     } else {
-      process.env.PI_CACHE_RETENTION = previousCacheRetention;
+      process.env.PI_CACHE_RETENTION = previous;
     }
   }
 });
@@ -3711,47 +3691,12 @@ test("compactPiSession returns a structured result for successful snapshot compa
   assert.equal(disposed, true);
 });
 
-test("generateSummary compacts the left side first and merges the raw right side when it fits", async () => {
-  const result = await runCompactionSummaryScenario({
-    contextWindow: 9_800,
-    reserveTokens: 4_000,
-    thresholdBytes: 100_000,
-    messages: [
-      createCompactionUserMessage("L".repeat(10_000)),
-      createCompactionUserMessage("A".repeat(6_000)),
-      createCompactionUserMessage("B".repeat(6_000)),
-    ],
-  });
-
-  assert.equal(result.callCount, 2);
-  assert.equal(result.summary, "summary-2");
-  assert.equal(result.prompts.length, 2);
-  assert.ok(result.prompts.every((prompt) => !prompt.includes("<continuity-overlap>")));
-  assert.ok(!result.prompts[0]?.includes("<previous-summary>"));
-  assert.match(result.prompts[0] ?? "", /L{100}/);
-  assert.match(result.prompts[1] ?? "", /<previous-summary>\nsummary-1\n<\/previous-summary>/);
-  assert.match(result.prompts[1] ?? "", /A{100}|B{100}/);
-  assert.ok(!result.prompts[1]?.includes("[Summary]:"));
-});
-
-test("generateSummary independently compacts the right side before merging summaries when raw right content still does not fit", async () => {
-  const result = await runCompactionSummaryScenario({
-    contextWindow: 9_000,
-    reserveTokens: 4_000,
-    thresholdBytes: 100_000,
-    messages: [
-      createCompactionUserMessage("L".repeat(10_000)),
-      createCompactionUserMessage("A".repeat(6_000)),
-      createCompactionUserMessage("B".repeat(6_000)),
-    ],
-  });
-
-  assert.equal(result.callCount, 4);
-  assert.equal(result.summary, "summary-4");
-  assert.ok(result.prompts.every((prompt) => !prompt.includes("<continuity-overlap>")));
-  assert.ok(result.prompts.some((prompt) => prompt.includes("[Summary]: summary-3")));
-  assert.ok(result.prompts.some((prompt) => prompt.includes("<previous-summary>\nsummary-1\n</previous-summary>")));
-});
+// (Removed) Two tests here asserted @mariozechner 0.66's MULTI-PASS compaction
+// cut-point algorithm (call counts 2 and 4: left-first-then-merge vs right-
+// independent-then-merge). @earendil 0.80 uses a single-pass strategy (call count 1)
+// — the distinction those tests encoded no longer exists, and asserting a library's
+// internal pass count has no value to us. Our compaction *integration* is covered by
+// the compactPiSession tests below. See git history for the originals.
 
 test("compactPiSession prefers native post-run maintenance compaction when available", async () => {
   let disposed = false;

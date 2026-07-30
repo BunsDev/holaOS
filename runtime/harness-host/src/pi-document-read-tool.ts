@@ -8,14 +8,14 @@ import {
   DEFAULT_MAX_BYTES,
   DEFAULT_MAX_LINES,
   type ToolDefinition,
-} from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-coding-agent";
 import {
   normalizeToLF,
   stripBom,
-} from "../node_modules/@mariozechner/pi-coding-agent/dist/core/tools/edit-diff.js";
+} from "../node_modules/@earendil-works/pi-coding-agent/dist/core/tools/edit-diff.js";
 import {
   resolveReadPath,
-} from "../node_modules/@mariozechner/pi-coding-agent/dist/core/tools/path-utils.js";
+} from "../node_modules/@earendil-works/pi-coding-agent/dist/core/tools/path-utils.js";
 import { extractHarnessAttachmentText } from "../../harnesses/src/attachment-content.js";
 import type { HarnessInputAttachmentPayload } from "../../harnesses/src/types.js";
 import { summarizeCode, type SummaryResult, type SummarySegment } from "./code-summary.js";

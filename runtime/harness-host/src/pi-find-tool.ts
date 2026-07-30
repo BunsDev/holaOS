@@ -6,11 +6,11 @@ import {
   createFindTool,
   DEFAULT_MAX_BYTES,
   formatSize,
-} from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
-import { ensureTool } from "../node_modules/@mariozechner/pi-coding-agent/dist/utils/tools-manager.js";
-import { resolveToCwd } from "../node_modules/@mariozechner/pi-coding-agent/dist/core/tools/path-utils.js";
-import { truncateHead } from "../node_modules/@mariozechner/pi-coding-agent/dist/core/tools/truncate.js";
+import { ensureTool } from "../node_modules/@earendil-works/pi-coding-agent/dist/utils/tools-manager.js";
+import { resolveToCwd } from "../node_modules/@earendil-works/pi-coding-agent/dist/core/tools/path-utils.js";
+import { truncateHead } from "../node_modules/@earendil-works/pi-coding-agent/dist/core/tools/truncate.js";
 
 const FIND_DEFAULT_LIMIT = 200;
 const FIND_MAX_LIMIT = 200;

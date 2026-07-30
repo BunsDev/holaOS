@@ -76,8 +76,5 @@
     "runtime/harness-host",
     "runtime/harnesses",
     "runtime/state-store"
-  ],
-  "patchedDependencies": {
-    "@mariozechner/pi-coding-agent@0.66.0": "patches/@mariozechner%2Fpi-coding-agent@0.66.0.patch"
-  }
+  ]
 }

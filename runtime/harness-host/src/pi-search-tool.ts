@@ -8,16 +8,16 @@ import {
   DEFAULT_MAX_BYTES,
   createGrepTool,
   formatSize,
-} from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
-import { ensureTool } from "../node_modules/@mariozechner/pi-coding-agent/dist/utils/tools-manager.js";
-import { resolveToCwd } from "../node_modules/@mariozechner/pi-coding-agent/dist/core/tools/path-utils.js";
+import { ensureTool } from "../node_modules/@earendil-works/pi-coding-agent/dist/utils/tools-manager.js";
+import { resolveToCwd } from "../node_modules/@earendil-works/pi-coding-agent/dist/core/tools/path-utils.js";
 import {
   GREP_MAX_LINE_LENGTH,
   truncateHead,
   truncateLine,
-} from "../node_modules/@mariozechner/pi-coding-agent/dist/core/tools/truncate.js";
-import { normalizeToLF, stripBom } from "../node_modules/@mariozechner/pi-coding-agent/dist/core/tools/edit-diff.js";
+} from "../node_modules/@earendil-works/pi-coding-agent/dist/core/tools/truncate.js";
+import { normalizeToLF, stripBom } from "../node_modules/@earendil-works/pi-coding-agent/dist/core/tools/edit-diff.js";
 import { openArchive, parseArchivePathCandidates } from "./pi-archive-reader.js";
 
 function normalizeDisplayPath(cwd: string, absolutePath: string): string {
