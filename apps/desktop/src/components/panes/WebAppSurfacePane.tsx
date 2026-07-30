@@ -60,6 +60,7 @@ export function WebAppSurfacePane({
   // client-side swap — no spinner, keep the current pixels.
   const prevIdentityRef = useRef<string | null>(null);
   const setActiveSurface = useSetAtom(activeWebAppSurfaceAtom);
+  const activeSurface = useAtomValue(activeWebAppSurfaceAtom);
   const reserveStoplightGutter = useStoplightCompensation();
   const sidebarCollapsed = useAtomValue(sidebarCollapsedAtom);
   const centerFullscreen = useAtomValue(centerFullscreenAtom);
@@ -74,13 +75,31 @@ export function WebAppSurfacePane({
   // keyed by a namespaced surface key (not the raw holaAppId), so the generic
   // appSurface.reload(appId) would miss it — navigateWebApp targets it correctly
   // and reloads the page.
+  // Reload where the surface actually is, not where it was sent. `path` is a
+  // one-shot handoff (`/compose?share=N` for a share, `/threads/:id` for a deep
+  // link) that outlives its use — refreshing against it replays the handoff
+  // instead of reloading the page the user is looking at.
+  const currentPath = (() => {
+    const live =
+      activeSurface?.holaAppId === holaAppId ? activeSurface.currentUrl : null;
+    if (!live) {
+      return path;
+    }
+    try {
+      const parsed = new URL(live);
+      return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+    } catch {
+      return path;
+    }
+  })();
+
   const handleRefresh = () => {
     setError("");
     setLoading(true);
     window.electronAPI.appSurface
       // forceReload: Refresh must re-load even if the view is already on this URL
       // (the warm-reopen short-circuit in main would otherwise skip it).
-      .navigateWebApp(holaAppId, path, url, true)
+      .navigateWebApp(holaAppId, currentPath, url, true)
       .then(() => setLoading(false))
       .catch((err: unknown) => {
         setLoading(false);
