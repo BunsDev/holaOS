@@ -1,4 +1,5 @@
 import { mergeAttributes, Node } from "@tiptap/core";
+import { useAtomValue } from "jotai";
 import {
   type NodeViewProps,
   NodeViewWrapper,
@@ -8,6 +9,7 @@ import {
 import { Feather } from "@/components/ui/icons";
 import { EntityChip } from "@/components/ui/entity-chip";
 import { SKILL_MENTION_NAME } from "./composerValue";
+import { skillTitlesAtom } from "./skillTitles";
 
 declare module "@tiptap/core" {
   interface Commands<ReturnType> {
@@ -22,7 +24,11 @@ declare module "@tiptap/core" {
 
 function SkillMentionChip({ node }: NodeViewProps) {
   const skillId = String(node.attrs.skillId ?? "");
-  const title = String(node.attrs.title ?? "") || skillId;
+  // The live list wins over the title baked into the node: a chip inserted
+  // before the workspace's skills had loaded stored the raw id, and nothing
+  // would ever revisit it.
+  const titles = useAtomValue(skillTitlesAtom);
+  const title = titles[skillId] || String(node.attrs.title ?? "") || skillId;
   return (
     <NodeViewWrapper as="span" className="mr-1 inline-flex align-middle">
       <EntityChip
