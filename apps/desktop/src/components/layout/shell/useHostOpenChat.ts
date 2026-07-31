@@ -3,6 +3,8 @@ import type {
   ChatStartAttachment,
 } from "@holaboss/app-host/protocol";
 import { useSetAtom } from "jotai";
+import { persistMediaGenerationModel } from "@/lib/mediaGenerationConfig";
+import { imageComposerModeAtom } from "@/components/panes/ChatPane/Composer/imageMode";
 import { useEffect, useRef } from "react";
 import {
   chatAppContextAttachmentRequestAtom,
@@ -89,6 +91,7 @@ export function useHostOpenChat(): void {
   const setSessionOpenRequest = useSetAtom(chatSessionOpenRequestAtom);
   const setChatPanelView = useSetAtom(chatPanelViewAtom);
   const setComposerPrefill = useSetAtom(chatComposerPrefillAtom);
+  const setImageComposerMode = useSetAtom(imageComposerModeAtom);
   const setLastViewedMap = useSetAtom(sessionLastViewedAtAtom);
   const setFocusMode = useSetAtom(focusModeAtom);
   const setProjectView = useSetAtom(projectViewAtom);
@@ -130,6 +133,23 @@ export function useHostOpenChat(): void {
           model: requestedModel,
           requestKey: seqRef.current,
         });
+      }
+
+      // The image tool takes no model, so reproducing an artifact faithfully
+      // means setting the workspace's image-generation model. Paired with image
+      // mode below, so the model pill in the composer shows what changed rather
+      // than the setting moving silently.
+      const requestedImageModel =
+        typeof payload.input?.imageModel === "string"
+          ? payload.input.imageModel.trim()
+          : "";
+      if (requestedImageModel) {
+        void persistMediaGenerationModel("image", requestedImageModel).catch(
+          () => {
+            // Config unwritable — the session still opens, on the current model.
+          }
+        );
+        setImageComposerMode(true);
       }
 
       // A reference Output rides in as base64 and lands as an ordinary pending

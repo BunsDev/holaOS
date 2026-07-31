@@ -121,6 +121,12 @@ export interface ChatStartInput {
    *  model the viewer does not have falls back to their default rather than
    *  failing the hand-off — a Reproduce should never be blocked by it. */
   model?: string;
+  /** Generate images with this model in the handed-over session. There is no
+   *  per-turn image model — the agent's image tool takes only prompt, filename
+   *  and size — so this sets the workspace's image-generation setting, and the
+   *  session opens in image mode where the model pill shows it. A remix that
+   *  quietly used a different model would not be a remix. */
+  imageModel?: string;
   /** Files to stage on the composer as pending attachments — a Reproduce sends
    *  the shared Output here so the viewer works "from something like this".
    *  They land as ordinary attachments, so removing one is just removing it. */
