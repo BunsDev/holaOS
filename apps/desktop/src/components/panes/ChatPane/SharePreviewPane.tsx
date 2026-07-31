@@ -17,14 +17,20 @@ import { AssistantTurn } from "./AssistantTurn";
 import {
   gatherSessionSnapshot,
   gatherQuotedToolItems,
+  describeSkipped,
   gatherShareAttributionItems,
   resolveOutputModel,
+  type SkippedArtifact,
   resolveRecipePrompt,
+  turnsForOutputs,
   gatherShareFiles,
   gatherShareImages,
   gatherShareVideos,
   isShareableDocOutput,
   isShareableMediaOutput,
+  enrichOutputs,
+  mergeOutputsByPath,
+  outputRecordsForTurns,
   type ShareableOutput,
   visibleText,
 } from "./AssistantTurn/shareCapture";
@@ -77,9 +83,11 @@ export function SharePreviewPane() {
   // deliverable docs (pdf/pptx/md/…) — the unit of the Outputs mode.
   const shareableOutputs = useMemo(
     () =>
-      messages.flatMap((m) =>
-        ((m.outputs ?? []) as ShareableOutput[]).filter(
-          (o) => isShareableMediaOutput(o) || isShareableDocOutput(o)
+      mergeOutputsByPath(
+        messages.flatMap((m) =>
+          ((m.outputs ?? []) as ShareableOutput[]).filter(
+            (o) => isShareableMediaOutput(o) || isShareableDocOutput(o)
+          )
         )
       ),
     [messages]
@@ -107,6 +115,7 @@ export function SharePreviewPane() {
   const [includeModel, setIncludeModel] = useState(true);
   const [caption, setCaption] = useState("");
   const [posting, setPosting] = useState(false);
+  const [shareError, setShareError] = useState("");
 
   const close = () => setOverlay(null);
   const toggleTurn = (id: string) =>
@@ -167,6 +176,10 @@ export function SharePreviewPane() {
       body: caption,
       items,
       form: "conversation",
+      // No prompt: a conversation is shared for its configuration, not its ask.
+      // The model is the configuration — without it "Same setup" installs the
+      // tools and then opens the session on whatever the viewer already had.
+      recipe: { prompt: "", model: payload.modelId ?? "", outputModel: "" },
       session: snapshot,
     });
   };
@@ -175,29 +188,40 @@ export function SharePreviewPane() {
     if (!payload) {
       return;
     }
+    // Collect what had to be left behind, so a share with nothing left to send
+    // can say why instead of leaving the button looking broken.
+    const skipped: SkippedArtifact[] = [];
+    // The chat renders what was delivered; the record that knows the prompt is
+    // the one the generating tool wrote, which never reaches a turn.
+    const ready = enrichOutputs(
+      chosenOutputs,
+      await outputRecordsForTurns(payload.workspaceId, chosenOutputs)
+    );
     const [images, videos, files] = await Promise.all([
-      gatherShareImages(chosenOutputs, payload.workspaceId),
-      gatherShareVideos(chosenOutputs, payload.workspaceId),
-      gatherShareFiles(chosenOutputs, payload.workspaceId),
+      gatherShareImages(ready, payload.workspaceId, skipped),
+      gatherShareVideos(ready, payload.workspaceId),
+      gatherShareFiles(ready, payload.workspaceId),
     ]);
     if (images.length === 0 && videos.length === 0 && files.length === 0) {
+      setShareError(
+        describeSkipped(skipped) ||
+          "Nothing in this selection could be shared."
+      );
       return;
     }
+    setShareError("");
     // Seed the apps that made these outputs; the user adds any skills/MCPs in the
     // composer's attach picker next.
-    const sourceInputIds = new Set(
-      chosenOutputs.map((o) => o.input_id).filter(Boolean)
-    );
-    const sourceTurns = messages.filter((m) => sourceInputIds.has(m.id));
+    const sourceTurns = turnsForOutputs(chosenOutputs, messages);
     const items = [
       ...gatherQuotedToolItems(sourceTurns, toolNames),
-      ...gatherShareAttributionItems(chosenOutputs),
+      ...gatherShareAttributionItems(ready),
     ];
     // What a viewer reproduces from: the ask that produced these artifacts.
     const recipe = {
       prompt: resolveRecipePrompt(chosenOutputs, messages),
       model: payload.modelId ?? "",
-      outputModel: resolveOutputModel(chosenOutputs),
+      outputModel: resolveOutputModel(ready),
     };
     // Hidden context so the composer's "Draft with AI" can caption the artifact
     // from what the assistant said while making it.
@@ -293,6 +317,12 @@ export function SharePreviewPane() {
             : `${selectedTurns.length}/${turns.length} turns`}
         </span>
         <div className="ml-auto flex items-center gap-2">
+          {/* Beside the button that did nothing, which is where someone looks. */}
+          {shareError ? (
+            <span className="max-w-[26rem] text-right text-[12px] text-destructive">
+              {shareError}
+            </span>
+          ) : null}
           {effectiveMode === "conversation" && model ? (
             <Button
               onClick={() => setIncludeModel((v) => !v)}

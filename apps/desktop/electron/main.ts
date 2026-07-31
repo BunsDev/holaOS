@@ -21,6 +21,7 @@ import {
   type ChatStartInput,
   type ChatStartResult,
   type EmployeesChangedInput,
+  HOST_COLOR_SCHEME_CHANGED,
   HOST_EMPLOYEES_CHANGED_EVENT,
   HOST_INSTALL_EVENT,
   HOST_INSTALL_RESULT,
@@ -30,6 +31,7 @@ import {
   HOST_OPEN_APP_EVENT,
   HOST_OPS,
   HOST_RENDERER_EVENT,
+  type HostColorScheme,
   type HostResult,
   type InstalledItem,
   type InstalledList,
@@ -1937,12 +1939,24 @@ function emitWorkbenchOpenBrowser(payload?: WorkbenchOpenBrowserPayload) {
   mainWindow.webContents.send("workbench:openBrowser", payload ?? {});
 }
 
+// Every app theme is named `<variant>-<scheme>`, so the scheme a hosted web
+// surface needs falls straight out of the theme the shell already reports.
+function currentColorScheme(): HostColorScheme {
+  return currentTheme.endsWith("-dark") ? "dark" : "light";
+}
+
 function emitThemeChanged() {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send("ui:themeChanged", currentTheme);
   }
   if (authPopupWindow && !authPopupWindow.isDestroyed()) {
     authPopupWindow.webContents.send("ui:themeChanged", currentTheme);
+  }
+  const scheme = currentColorScheme();
+  for (const view of appSurfaceViews.values()) {
+    if (!view.webContents.isDestroyed()) {
+      view.webContents.send(HOST_COLOR_SCHEME_CHANGED, scheme);
+    }
   }
 }
 
@@ -27501,6 +27515,11 @@ app.whenReady().then(async () => {
   });
   handleTrustedIpc("appSurface:hide", ["main"], () => {
     hideAppSurface();
+  });
+  // Synchronous by design: the app-surface preload reads this before the hosted
+  // page's boot script runs, so the page never paints a frame in the wrong theme.
+  ipcMain.on(HOST_IPC.colorScheme, (event) => {
+    event.returnValue = currentColorScheme();
   });
   // Host bridge (called by the UNTRUSTED hosted page via appSurfacePreload).
   // NOT handleTrustedIpc: the caller is verified by mapping event.sender → its

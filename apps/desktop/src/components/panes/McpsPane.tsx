@@ -28,6 +28,10 @@ import { McpInstallDialog } from "@/components/layout/shell/McpInstallDialog";
 import { McpMarketplaceCard } from "@/components/layout/shell/McpMarketplaceCard";
 import { useMcpCatalog } from "@/components/layout/shell/useMcpCatalog";
 import type { McpCatalogEntry } from "@/lib/mcpMarketplace";
+import {
+  deleteCustomHolaApp,
+  readCustomHolaApps,
+} from "@/lib/localCustomHolaApps";
 
 // The MCP tab. Mirrors the Integrations tab's store/connected split:
 //   mode="browse"  → the MCP marketplace (install standalone MCP servers)
@@ -127,7 +131,8 @@ function McpsBrowse({
 
   // Preview the servers connected to this workspace (catalog-named when known,
   // else the raw server id), with a "See all" link into the full connected view.
-  const INSTALLED_PREVIEW = 6;
+  // Every connected server, listed in full — this is the manage surface, so a
+  // capped preview only meant a trip to a second screen to see the rest.
   const catalogById = new Map(
     catalog.map((entry) => [entry.id, entry] as const)
   );
@@ -136,19 +141,6 @@ function McpsBrowse({
     name: catalogById.get(server.id)?.name ?? server.id,
     entry: catalogById.get(server.id) ?? null,
   }));
-  const installedPreview = connectedItems.slice(0, INSTALLED_PREVIEW);
-  const namedHidden = connectedItems
-    .slice(INSTALLED_PREVIEW, INSTALLED_PREVIEW + 2)
-    .map((item) => item.name);
-  const hiddenCount = connectedItems.length - installedPreview.length;
-  const seeMoreLabel =
-    namedHidden.length > 0
-      ? `See ${namedHidden.join(", ")}${
-          hiddenCount - namedHidden.length > 0
-            ? `, and ${hiddenCount - namedHidden.length} more`
-            : ""
-        }`
-      : `See all ${connectedItems.length} connected`;
 
   const removeConnected = async (item: {
     id: string;
@@ -251,11 +243,11 @@ function McpsBrowse({
   return (
     <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
       <div className="mx-auto w-full max-w-5xl space-y-6 px-6">
-        {onSeeInstalled && installedPreview.length > 0 ? (
+        {onSeeInstalled && connectedItems.length > 0 ? (
           <section className="flex flex-col gap-2.5">
             <h3 className="font-medium text-foreground text-sm">Installed</h3>
             <div className="grid grid-cols-1 gap-x-4 gap-y-2 sm:grid-cols-2">
-              {installedPreview.map((item) => (
+              {connectedItems.map((item) => (
                 <div
                   className="group/card flex items-center gap-3 rounded-xl border border-border bg-card px-3 py-2.5"
                   key={item.id}
@@ -289,13 +281,6 @@ function McpsBrowse({
                 </div>
               ))}
             </div>
-            <button
-              className="self-start text-muted-foreground text-sm transition-colors hover:text-foreground"
-              onClick={onSeeInstalled}
-              type="button"
-            >
-              {seeMoreLabel}
-            </button>
           </section>
         ) : null}
 
@@ -367,6 +352,8 @@ function McpsConnected({
   const [deleteBusyId, setDeleteBusyId] = useState<string | null>(null);
   const [refreshBusy, setRefreshBusy] = useState(false);
   const [authorizeBusyId, setAuthorizeBusyId] = useState<string | null>(null);
+  const [pendingCustomDelete, setPendingCustomDelete] =
+    useState<WorkspaceMcpServerEntryPayload | null>(null);
 
   const reload = useCallback(async () => {
     if (!workspaceId) {
@@ -412,6 +399,43 @@ function McpsConnected({
       }
     },
     [workspaceId, reload],
+  );
+
+  // Custom HolaApp connectors (ownerAppId `custom-…`) are user-created and freely
+  // removable — unlike a hosted app's server. They're hidden from the standalone
+  // list (filtered by ownerAppId) AND absent from the Apps tab, so a connector whose
+  // OAuth was never completed (e.g. a pasted HeyGen URL) errors every turn with no
+  // way to fix or remove it. Deleting the local app record stops the per-turn
+  // re-attach; the uninstall bridge detaches its server from workspace.yaml now.
+  const removeCustomApp = useCallback(
+    async (server: WorkspaceMcpServerEntryPayload) => {
+      const holaAppId = server.ownerAppId;
+      if (!holaAppId) {
+        return;
+      }
+      const title =
+        readCustomHolaApps().find((app) => app.holaAppId === holaAppId)?.title ??
+        server.id;
+      setDeleteBusyId(server.id);
+      try {
+        deleteCustomHolaApp(holaAppId);
+        await window.electronAPI.holaApps?.uninstall(holaAppId);
+        setServers((previous) =>
+          previous.filter((entry) => entry.id !== server.id),
+        );
+        toast.success(`Removed "${title}"`, {
+          description: "Its tools disappear from the agent on the next turn.",
+        });
+        void reload();
+      } catch (error) {
+        toast.error(`Couldn't remove "${title}"`, {
+          description: error instanceof Error ? error.message : "Request failed.",
+        });
+      } finally {
+        setDeleteBusyId(null);
+      }
+    },
+    [reload],
   );
 
   // Kick off the interactive OAuth flow for a remote MCP server that needs it
@@ -551,8 +575,88 @@ function McpsConnected({
     </SettingsRow>
   );
 
-  // Standalone MCPs only — app-owned MCPs are managed via their app's lifecycle.
+  // A custom app's title, for the connector row label. Cheap localStorage read.
+  const customTitleById = new Map(
+    readCustomHolaApps().map((app) => [app.holaAppId, app.title] as const),
+  );
+
+  const renderCustomAppRow = (server: WorkspaceMcpServerEntryPayload) => {
+    const title = server.ownerAppId
+      ? (customTitleById.get(server.ownerAppId) ?? server.id)
+      : server.id;
+    return (
+      <SettingsRow
+        key={server.id}
+        leading={<Server className="size-4 text-muted-foreground" />}
+        label={
+          <span className="flex items-center gap-2">
+            <span className="truncate">{title}</span>
+            <SettingsStatusBadge tone="muted">Custom app</SettingsStatusBadge>
+          </span>
+        }
+        description={server.url ?? "Custom app connector"}
+      >
+        <div className="flex items-center gap-2">
+          {server.transport === "remote" ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                render={
+                  <Button
+                    aria-label={`Authorize ${title}`}
+                    disabled={authorizeBusyId === server.id}
+                    size="sm"
+                    type="button"
+                    variant="outline"
+                  >
+                    {authorizeBusyId === server.id ? (
+                      <Loader2 className="size-3.5 animate-spin" />
+                    ) : (
+                      <ShieldCheck className="size-3.5" />
+                    )}
+                    Sign in
+                    <ChevronDown className="size-3.5" />
+                  </Button>
+                }
+              />
+              <DropdownMenuContent align="end" className="min-w-[240px]">
+                <DropdownMenuItem
+                  onClick={() => void authorizeServer(server, false)}
+                >
+                  Sign in
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => void authorizeServer(server, true)}
+                >
+                  Switch account (re-authorize)
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : null}
+          <Button
+            aria-label={`Remove ${title}`}
+            className="text-muted-foreground hover:text-destructive"
+            disabled={deleteBusyId === server.id}
+            onClick={() => setPendingCustomDelete(server)}
+            size="icon-sm"
+            variant="ghost"
+          >
+            {deleteBusyId === server.id ? (
+              <Loader2 className="size-3.5 animate-spin" />
+            ) : (
+              <Trash2 className="size-3.5" />
+            )}
+          </Button>
+        </div>
+      </SettingsRow>
+    );
+  };
+
+  // Standalone MCPs (no owner) and user-created custom-app connectors get manage
+  // rows; hosted-app-owned servers stay hidden (managed via their app's lifecycle).
   const standalone = servers.filter((server) => !server.ownerAppId);
+  const customAppServers = servers.filter((server) =>
+    server.ownerAppId?.startsWith("custom-"),
+  );
 
   return (
     <div className="min-h-0 flex-1 overflow-y-auto py-6">
@@ -590,7 +694,7 @@ function McpsConnected({
           </div>
         </div>
 
-        {standalone.length === 0 ? (
+        {standalone.length === 0 && customAppServers.length === 0 ? (
           <EmptyState
             action={
               onBrowseMarketplace ? (
@@ -611,7 +715,28 @@ function McpsConnected({
             title="No MCP servers connected yet"
           />
         ) : (
-          <SettingsCard>{standalone.map(renderRow)}</SettingsCard>
+          <>
+            {standalone.length > 0 ? (
+              <SettingsCard>{standalone.map(renderRow)}</SettingsCard>
+            ) : null}
+            {customAppServers.length > 0 ? (
+              <section className="space-y-2.5">
+                <div className="space-y-1">
+                  <h3 className="font-medium text-foreground text-sm">
+                    Custom apps
+                  </h3>
+                  <p className="text-muted-foreground text-xs">
+                    Connectors from apps you created yourself. Finish sign-in to
+                    use their tools, or remove one to stop it re-attaching every
+                    turn.
+                  </p>
+                </div>
+                <SettingsCard>
+                  {customAppServers.map(renderCustomAppRow)}
+                </SettingsCard>
+              </section>
+            ) : null}
+          </>
         )}
       </div>
 
@@ -636,6 +761,33 @@ function McpsConnected({
         }}
         open={pendingDelete !== null}
         title="Remove this MCP server?"
+      />
+
+      <ConfirmDialog
+        confirmLabel="Remove"
+        description={
+          pendingCustomDelete
+            ? `This removes the custom app "${
+                (pendingCustomDelete.ownerAppId &&
+                  customTitleById.get(pendingCustomDelete.ownerAppId)) ||
+                pendingCustomDelete.id
+              }" and its connector. The agent loses its tools on the next turn.`
+            : undefined
+        }
+        destructive
+        onConfirm={() => {
+          if (pendingCustomDelete) {
+            void removeCustomApp(pendingCustomDelete);
+          }
+          setPendingCustomDelete(null);
+        }}
+        onOpenChange={(open) => {
+          if (!open) {
+            setPendingCustomDelete(null);
+          }
+        }}
+        open={pendingCustomDelete !== null}
+        title="Remove this custom app?"
       />
     </div>
   );

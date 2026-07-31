@@ -152,3 +152,47 @@ test("importSkillFromGithub: re-import reports replaced=true", async () => {
   const second = await importSkillFromGithub({ workspaceDir, url });
   assert.equal(second.replaced, true);
 });
+
+// A bare-repo URL (root has no SKILL.md) still installs when the repo keeps its
+// one skill in skills/<name>/ — the plugin/collection layout (e.g. banana-claude).
+test("importSkillFromGithub: bare repo URL auto-discovers a lone skill folder", async () => {
+  const tarball = await buildRepoTarball(); // root has no SKILL.md; skills/pdf/ does
+  globalThis.fetch = (async () => new Response(new Uint8Array(tarball), { status: 200 })) as typeof fetch;
+
+  const workspaceDir = mkTmp("hb-skill-ws-");
+  const result = await importSkillFromGithub({
+    workspaceDir,
+    url: "https://github.com/acme/repo", // bare repo, no sub-path
+  });
+
+  assert.equal(result.id, "pdf");
+  assert.ok(fs.existsSync(path.join(workspaceDir, "skills", "pdf", "SKILL.md")));
+});
+
+async function buildMultiSkillTarball(): Promise<Buffer> {
+  const src = mkTmp("hb-skill-src-");
+  for (const name of ["pdf", "csv"]) {
+    const skillDir = path.join(src, "repo-main", "skills", name);
+    fs.mkdirSync(skillDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(skillDir, "SKILL.md"),
+      `---\nname: ${name}\ndescription: Use for ${name} files.\n---\n# ${name}\n`,
+    );
+  }
+  const tarPath = path.join(src, "archive.tgz");
+  await tar.c({ gzip: true, cwd: src, file: tarPath }, ["repo-main"]);
+  return fs.readFileSync(tarPath);
+}
+
+// A collection with several skills can't be auto-resolved — the error tells the
+// user to point the URL at one skill folder.
+test("importSkillFromGithub: bare repo URL with multiple skills asks you to pick one", async () => {
+  const tarball = await buildMultiSkillTarball();
+  globalThis.fetch = (async () => new Response(new Uint8Array(tarball), { status: 200 })) as typeof fetch;
+
+  const workspaceDir = mkTmp("hb-skill-ws-");
+  await assert.rejects(
+    importSkillFromGithub({ workspaceDir, url: "https://github.com/acme/repo" }),
+    /point the URL at one skill folder/,
+  );
+});

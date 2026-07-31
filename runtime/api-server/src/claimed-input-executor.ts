@@ -93,7 +93,7 @@ const CONTEXT_BUDGET_COMPACTION_EVENT_TYPES = new Set([
   "compaction_restored",
 ]);
 const PI_PACKAGE_ENTRY_PATH = fileURLToPath(
-  import.meta.resolve("@mariozechner/pi-coding-agent"),
+  import.meta.resolve("@earendil-works/pi-coding-agent"),
 );
 const PI_SESSION_MANAGER_MODULE_PATH = path.join(
   path.dirname(PI_PACKAGE_ENTRY_PATH),
@@ -4217,6 +4217,12 @@ export async function processClaimedInput(params: {
     });
 
     const assistantParts: string[] = [];
+    // assistantParts.length at the last cleanly-ended assistant message. On a pi
+    // in-turn retry (auto_retry_start) we truncate assistantParts back to this
+    // boundary, dropping the failed attempt's partial deltas so the persisted
+    // assistantText isn't the truncated attempt concatenated with the retried
+    // one. Mirrors pi's own messages.slice(0, -1).
+    let committedAssistantPartsLength = 0;
     let capturedPiAssistantMessage: Record<string, unknown> | null = null;
     let syncedEphemeralLiveSessionFile: string | null = null;
     let terminalStatus: "IDLE" | "WAITING_USER" | "PAUSED" | "ERROR" = "IDLE";
@@ -4370,6 +4376,7 @@ export async function processClaimedInput(params: {
           failureMessage,
         });
         assistantParts.length = 0;
+        committedAssistantPartsLength = 0;
         capturedPiAssistantMessage = null;
         terminalStatus = "IDLE";
         lastError = null;
@@ -4450,9 +4457,32 @@ export async function processClaimedInput(params: {
               checkpointHarnessSessionId = terminalHarnessSessionId;
             }
             if (eventType === "pi_native_event") {
-              capturedPiAssistantMessage =
-                assistantMessageFromPiNativeEventPayload(eventPayload) ??
-                capturedPiAssistantMessage;
+              const piAssistantMessage =
+                assistantMessageFromPiNativeEventPayload(eventPayload);
+              if (piAssistantMessage) {
+                capturedPiAssistantMessage = piAssistantMessage;
+                // A cleanly-ended assistant message commits the current
+                // assistantParts as the retry-truncation boundary. An
+                // errored/aborted message does NOT commit — its partial deltas
+                // are exactly what a subsequent auto_retry_start drops.
+                const piStopReason =
+                  typeof piAssistantMessage.stopReason === "string"
+                    ? piAssistantMessage.stopReason
+                    : null;
+                if (piStopReason !== "error" && piStopReason !== "aborted") {
+                  committedAssistantPartsLength = assistantParts.length;
+                }
+              }
+            }
+            if (eventType === "auto_retry_start") {
+              // pi is retrying the failed last message in-turn — it removed that
+              // message from its own state (slice(0, -1)) and will re-stream it.
+              // Drop the failed attempt's partial deltas so the persisted
+              // assistantText isn't the truncated attempt concatenated with the
+              // retried one.
+              if (assistantParts.length > committedAssistantPartsLength) {
+                assistantParts.length = committedAssistantPartsLength;
+              }
             }
             if (eventType === "run_completed" || eventType === "run_failed") {
               deferredTerminalEvent = {

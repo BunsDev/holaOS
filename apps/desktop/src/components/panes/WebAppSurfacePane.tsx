@@ -16,6 +16,7 @@ import {
   sidebarCollapsedAtom,
 } from "@/components/layout/shell/state/ui";
 import { Loader2, RefreshCw, X } from "@/components/ui/icons";
+import { cn } from "@/lib/utils";
 import { useStoplightCompensation } from "@/lib/StoplightContext";
 
 interface WebAppSurfacePaneProps {
@@ -59,6 +60,7 @@ export function WebAppSurfacePane({
   // client-side swap — no spinner, keep the current pixels.
   const prevIdentityRef = useRef<string | null>(null);
   const setActiveSurface = useSetAtom(activeWebAppSurfaceAtom);
+  const activeSurface = useAtomValue(activeWebAppSurfaceAtom);
   const reserveStoplightGutter = useStoplightCompensation();
   const sidebarCollapsed = useAtomValue(sidebarCollapsedAtom);
   const centerFullscreen = useAtomValue(centerFullscreenAtom);
@@ -73,13 +75,31 @@ export function WebAppSurfacePane({
   // keyed by a namespaced surface key (not the raw holaAppId), so the generic
   // appSurface.reload(appId) would miss it — navigateWebApp targets it correctly
   // and reloads the page.
+  // Reload where the surface actually is, not where it was sent. `path` is a
+  // one-shot handoff (`/compose?share=N` for a share, `/threads/:id` for a deep
+  // link) that outlives its use — refreshing against it replays the handoff
+  // instead of reloading the page the user is looking at.
+  const currentPath = (() => {
+    const live =
+      activeSurface?.holaAppId === holaAppId ? activeSurface.currentUrl : null;
+    if (!live) {
+      return path;
+    }
+    try {
+      const parsed = new URL(live);
+      return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+    } catch {
+      return path;
+    }
+  })();
+
   const handleRefresh = () => {
     setError("");
     setLoading(true);
     window.electronAPI.appSurface
       // forceReload: Refresh must re-load even if the view is already on this URL
       // (the warm-reopen short-circuit in main would otherwise skip it).
-      .navigateWebApp(holaAppId, path, url, true)
+      .navigateWebApp(holaAppId, currentPath, url, true)
       .then(() => setLoading(false))
       .catch((err: unknown) => {
         setLoading(false);
@@ -213,7 +233,20 @@ export function WebAppSurfacePane({
         // renderer DOM, so without this strip it occludes that expand button when
         // the sidebar is collapsed. Persistent (not collapse-gated) so toggling
         // the sidebar doesn't shift the surface vertically.
-        <div className="window-drag h-9 shrink-0 bg-background" />
+        <div className="window-drag flex h-9 shrink-0 items-center justify-end bg-background pr-3">
+          {/* The header this surface drops carries the only Refresh, and a
+              hosted feed is exactly the thing a user expects to be able to
+              reload. Right-aligned, clear of the stoplight gutter. */}
+          <button
+            aria-label={`Refresh ${title}`}
+            className="window-no-drag grid size-6 place-items-center rounded text-neutral-500 transition-colors hover:bg-neutral-100 hover:text-neutral-800 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+            onClick={handleRefresh}
+            title="Refresh"
+            type="button"
+          >
+            <RefreshCw className={cn("size-4", loading && "animate-spin")} />
+          </button>
+        </div>
       ) : (
         <div
           className="window-drag flex h-9 shrink-0 items-center gap-2 border-neutral-200 border-b pr-3 transition-[padding-left] duration-stride ease-out-expo dark:border-neutral-800"

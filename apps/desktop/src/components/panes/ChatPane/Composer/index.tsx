@@ -22,6 +22,7 @@ import {
   Plus,
   Sparkles,
   Square,
+  Store,
   Upload,
   Wand2,
   X,
@@ -34,12 +35,14 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuSub,
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useAtomValue, useSetAtom } from "jotai";
+import { useOpenDiscover } from "@/components/layout/shell/useOpenDiscover";
 import { BrowseIntegrationsSubmenu } from "./BrowseIntegrationsSubmenu";
 import { EntityChip } from "@/components/ui/entity-chip";
 import { ImageComposerControls } from "./ImageComposerControls";
@@ -325,6 +328,7 @@ export function Composer({
     );
   }, [projectOptions, selectedProjectId]);
   const [isDragActive, setIsDragActive] = useState(false);
+  const openDiscover = useOpenDiscover();
   const imageMode = useAtomValue(imageComposerModeAtom);
   const setImageMode = useSetAtom(imageComposerModeAtom);
   const videoMode = useAtomValue(videoComposerModeAtom);
@@ -746,6 +750,16 @@ export function Composer({
                   Skills
                 </DropdownMenuSubTrigger>
                 <DropdownMenuSubContent className="max-h-[320px] min-w-[240px] overflow-y-auto">
+                  {/* First, not last: the list scrolls, and an entry below two
+                      dozen skills is one nobody finds. */}
+                  <DropdownMenuItem
+                    className="gap-2 rounded-md px-2 py-1.5 text-[13px]"
+                    onClick={() => openDiscover("/marketplace?type=skill")}
+                  >
+                    <Store className="size-4" />
+                    Browse skills
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
                   {plusMenuSkillCommands.length > 0 ? (
                     plusMenuSkillCommands.map((command) => (
                       <DropdownMenuItem
@@ -778,6 +792,14 @@ export function Composer({
                   Capabilities
                 </DropdownMenuSubTrigger>
                 <DropdownMenuSubContent className="max-h-[320px] min-w-[240px] overflow-y-auto">
+                  <DropdownMenuItem
+                    className="gap-2 rounded-md px-2 py-1.5 text-[13px]"
+                    onClick={() => openDiscover("/marketplace?type=capability")}
+                  >
+                    <Store className="size-4" />
+                    Browse capabilities
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
                   {plusMenuCapabilityCommands.length > 0 ? (
                     plusMenuCapabilityCommands.map((command) => (
                       <DropdownMenuItem

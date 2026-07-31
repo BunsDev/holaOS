@@ -209,6 +209,7 @@ import {
   inputIdFromMessageId,
   inputIdFromHistoryMessage,
   historyMessagesInDisplayOrder,
+  normalizeErrorMessage,
   turnInputIdsFromHistoryMessages,
 } from "./helpers";
 import { HistoryRestoreSkeleton } from "./skeletons";
@@ -354,10 +355,6 @@ function runtimeModelHasChatCapability(model: RuntimeProviderModelPayload) {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
-function normalizeErrorMessage(error: unknown) {
-  return error instanceof Error ? error.message : "Request failed.";
 }
 
 // True when the DataTransfer carries something the chat composer would
@@ -2194,40 +2191,13 @@ export function phaseTraceStepFromEvent(
   }
 
   if (eventType === "mcp_server_unavailable") {
-    const serverId =
-      typeof payload.server_id === "string" ? payload.server_id.trim() : "";
-    const reason =
-      typeof payload.reason === "string" ? payload.reason.trim() : "";
-    const missingToolIds = Array.isArray(payload.missing_tool_ids)
-      ? payload.missing_tool_ids.filter(
-          (item): item is string => typeof item === "string" && item.length > 0,
-        )
-      : [];
-    if (reason) {
-      details.push(reason);
-    }
-    if (missingToolIds.length > 0) {
-      const preview = missingToolIds.slice(0, 5).join(", ");
-      const suffix =
-        missingToolIds.length > 5
-          ? ` (+${missingToolIds.length - 5} more)`
-          : "";
-      details.push(`Skipped tools: ${preview}${suffix}`);
-    }
-    return {
-      id: `phase:mcp-unavailable:${serverId || `seq-${order}`}`,
-      kind: "phase",
-      title: serverId
-        ? `MCP server unavailable: ${serverId}`
-        : "MCP server unavailable",
-      status: "error",
-      recoverable: true,
-      details:
-        details.length > 0
-          ? details
-          : ["The agent will continue without this server's tools."],
-      order,
-    };
+    // Don't surface this in the transcript at all. It's a recoverable notice —
+    // the run continues without the server's tools (e.g. an OAuth connector never
+    // signed into) — but rendering it every turn read as a failure and was pure
+    // noise. The actionable paths live elsewhere: the inline authorize card
+    // (mcpAuthorizations, collected in a separate pass) and Customize → MCPs →
+    // Custom apps (sign in / remove). So emit no step.
+    return null;
   }
 
   if (eventType === "auto_compaction_end") {
@@ -4375,6 +4345,21 @@ export function ChatPane({
     setLiveAssistantText("");
     setLiveAgentStatus("");
     setLiveExecutionItems([]);
+  }
+
+  // Reset only the in-progress streamed text for a pi in-turn retry
+  // (auto_retry_start): pi dropped the failed last message from its own state
+  // (slice(0, -1)) and will re-stream it, so discard that attempt's unflushed
+  // partial text. Already-flushed segments from prior messages and the active
+  // message id are kept, so the retried deltas land fresh in the same bubble
+  // instead of concatenating onto the truncated attempt ("The answer is 4" +
+  // "The answer is 42.").
+  function resetLiveOutputForRetry() {
+    cancelLiveAssistantFlush();
+    liveAssistantTextRef.current = "";
+    liveAssistantRevealedRef.current = 0;
+    stopLiveReveal();
+    setLiveAssistantText("");
   }
 
   function rememberMainSessionEventBatchInput(
@@ -6596,6 +6581,25 @@ export function ChatPane({
                 .catch(() => undefined);
             }
           }
+        }
+
+        if (eventType === "auto_retry_start") {
+          // pi is retrying the failed last message in-turn (it dropped that
+          // message from its own state and will re-stream it). Discard the
+          // failed attempt's in-progress streamed text so the retried deltas
+          // don't concatenate onto the truncated partial in the same bubble.
+          resetLiveOutputForRetry();
+          appendStreamTelemetry({
+            streamId: payload.streamId,
+            transportType: payload.type,
+            eventName,
+            eventType,
+            inputId: eventInputId,
+            sessionId: eventSessionId,
+            action: "reset_live_output_on_retry",
+            detail: "auto_retry_start",
+          });
+          return;
         }
 
         if (eventType === "output_delta") {

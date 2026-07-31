@@ -668,6 +668,10 @@ interface SyncedSubagentRunState {
 export interface RuntimeAgentToolsGenerateImageParams {
   workspaceId: string;
   sessionId?: string | null;
+  /** The turn this image belongs to. Without it the recorded output is not
+   *  turn-scoped, and the end-of-turn file scan registers the file a second
+   *  time instead of deduping against what this tool already recorded. */
+  inputId?: string | null;
   selectedModel?: string | null;
   prompt: string;
   filename?: string | null;
@@ -677,6 +681,9 @@ export interface RuntimeAgentToolsGenerateImageParams {
 export interface RuntimeAgentToolsGenerateVideoParams {
   workspaceId: string;
   sessionId?: string | null;
+  /** The turn this video belongs to — without it the recorded output is not
+   *  turn-scoped and the end-of-turn scan registers the file a second time. */
+  inputId?: string | null;
   selectedModel?: string | null;
   prompt: string;
   filename?: string | null;
@@ -5859,21 +5866,67 @@ export class RuntimeAgentToolsService {
       throw new RuntimeAgentToolsServiceError(400, "image_prompt_required", "prompt is required");
     }
     try {
+      const imageOutputRoot = this.store.sessionOutputRoot({
+        workspaceId: params.workspaceId,
+        sessionId,
+      });
       const generated = await generateWorkspaceImage({
         workspaceRoot: this.options.workspaceRoot,
         workspaceId: params.workspaceId,
         // Project-bound sessions write artifacts under the project dir, not the
         // workspace root (mirrors resolveOutputAbsolutePath's read side).
-        outputRoot: this.store.sessionOutputRoot({
-          workspaceId: params.workspaceId,
-          sessionId,
-        }),
+        outputRoot: imageOutputRoot,
         sessionId,
         inputId: "runtime-tool",
         selectedModel: params.selectedModel,
         prompt,
         filename: params.filename,
         size: params.size,
+      });
+      // Register the image as this turn's output ourselves rather than leaving it
+      // to the end-of-turn file scan. The scan only sees "a new file appeared",
+      // so an image recorded that way carries no trace of what generated it —
+      // and which model made a picture is exactly what someone looking at it
+      // later wants to know. The turn-scoped dedup guard means recording it here
+      // suppresses the scan's own entry rather than duplicating it.
+      this.store.createOutput({
+        workspaceId: params.workspaceId,
+        outputType: "image",
+        title: path.basename(generated.filePath),
+        status: "completed",
+        // Absolute, so the end-of-turn scan's dedup — which compares absolute
+        // paths — matches this row. A relative path would be resolved against
+        // the project root instead of the session root this image was written
+        // to, miss, and the scan would register the same file a second time.
+        filePath: path.isAbsolute(generated.filePath)
+          ? generated.filePath
+          : path.join(imageOutputRoot, generated.filePath),
+        sessionId,
+        inputId: normalizedString(params.inputId) || null,
+        artifactId: randomUUID(),
+        metadata: {
+          origin_type: "runtime_tool",
+          change_type: "created",
+          category: "image",
+          artifact_type: "image",
+          mime_type: generated.mimeType,
+          size_bytes: generated.sizeBytes,
+          tool_id: "image_generate",
+          model: generated.modelId,
+          // The generation itself, so anyone who sees this image later can read
+          // what produced it. `prompt` is what the caller compiled and sent;
+          // `revised_prompt` is what the provider rewrote it to, which is a
+          // different fact and worth keeping separately.
+          prompt: generated.prompt,
+          ...(generated.revisedPrompt
+            ? { revised_prompt: generated.revisedPrompt }
+            : {}),
+          ...(normalizedString(params.size)
+            ? { image_size: normalizedString(params.size) }
+            : {}),
+          ...(generated.providerId ? { provider: generated.providerId } : {}),
+          ...(sessionId ? { source_session_id: sessionId } : {}),
+        },
       });
       return {
         file_path: generated.filePath,
@@ -5906,15 +5959,16 @@ export class RuntimeAgentToolsService {
       throw new RuntimeAgentToolsServiceError(400, "video_prompt_required", "prompt is required");
     }
     try {
+      const videoOutputRoot = this.store.sessionOutputRoot({
+        workspaceId: params.workspaceId,
+        sessionId,
+      });
       const generated = await generateWorkspaceVideo({
         workspaceRoot: this.options.workspaceRoot,
         workspaceId: params.workspaceId,
         // Project-bound sessions write artifacts under the project dir, not the
         // workspace root (mirrors resolveOutputAbsolutePath's read side).
-        outputRoot: this.store.sessionOutputRoot({
-          workspaceId: params.workspaceId,
-          sessionId,
-        }),
+        outputRoot: videoOutputRoot,
         sessionId,
         inputId: "runtime-tool",
         selectedModel: params.selectedModel,
@@ -5922,6 +5976,38 @@ export class RuntimeAgentToolsService {
         filename: params.filename,
         size: params.size,
         seconds: params.seconds,
+      });
+      // Same reason as image_generate: left to the end-of-turn file scan this
+      // would be recorded as "a new .mp4 appeared", with no trace of the prompt
+      // or model behind it. Absolute path so the scan's dedup matches.
+      this.store.createOutput({
+        workspaceId: params.workspaceId,
+        outputType: "video",
+        title: path.basename(generated.filePath),
+        status: "completed",
+        filePath: path.isAbsolute(generated.filePath)
+          ? generated.filePath
+          : path.join(videoOutputRoot, generated.filePath),
+        sessionId,
+        inputId: normalizedString(params.inputId) || null,
+        artifactId: randomUUID(),
+        metadata: {
+          origin_type: "runtime_tool",
+          change_type: "created",
+          category: "video",
+          artifact_type: "video",
+          mime_type: generated.mimeType,
+          size_bytes: generated.sizeBytes,
+          tool_id: "video_generate",
+          model: generated.modelId,
+          prompt: generated.prompt,
+          ...(normalizedString(params.size)
+            ? { video_size: normalizedString(params.size) }
+            : {}),
+          ...(params.seconds ? { video_seconds: params.seconds } : {}),
+          ...(generated.providerId ? { provider: generated.providerId } : {}),
+          ...(sessionId ? { source_session_id: sessionId } : {}),
+        },
       });
       return {
         file_path: generated.filePath,
@@ -6320,6 +6406,51 @@ export class RuntimeAgentToolsService {
     };
   }
 
+  /** What an earlier record of the same file already knows about how it was
+   *  made. Only the generation keys — the delivery record keeps its own identity. */
+  private generationMetadataFor(
+    workspaceId: string,
+    inputId: string | null,
+    filePath: string
+  ): Record<string, unknown> {
+    if (!inputId) {
+      return {};
+    }
+    const GENERATION_KEYS = [
+      "prompt",
+      "revised_prompt",
+      "model",
+      "model_id",
+      "provider",
+      "image_size",
+      "video_size",
+      "video_seconds",
+      "category",
+      "artifact_type",
+    ];
+    try {
+      const prior = this.store.listOutputs({ workspaceId, inputId, limit: 50 });
+      for (const record of prior) {
+        if (record.filePath !== filePath || !record.metadata) {
+          continue;
+        }
+        const meta = record.metadata as Record<string, unknown>;
+        const carried: Record<string, unknown> = {};
+        for (const key of GENERATION_KEYS) {
+          if (meta[key] !== undefined && meta[key] !== null) {
+            carried[key] = meta[key];
+          }
+        }
+        if (Object.keys(carried).length > 0) {
+          return carried;
+        }
+      }
+    } catch {
+      // A lookup failure must never stop a file from being delivered.
+    }
+    return {};
+  }
+
   /**
    * Deliver an EXISTING file to the user by registering it as this turn's output
    * (so channel egress / the chat sends it as an attachment). Unlike write_report
@@ -6351,6 +6482,7 @@ export class RuntimeAgentToolsService {
       throw new RuntimeAgentToolsServiceError(400, "send_file_not_a_file", `not a file: ${rawPath}`);
     }
     const title = path.basename(absolutePath);
+    const inputId = normalizedString(params.inputId) || null;
     const output = this.store.createOutput({
       workspaceId: params.workspaceId,
       outputType: "file",
@@ -6358,9 +6490,13 @@ export class RuntimeAgentToolsService {
       status: "completed",
       filePath: absolutePath,
       sessionId: sessionId || null,
-      inputId: normalizedString(params.inputId) || null,
+      inputId,
       artifactId: randomUUID(),
       metadata: {
+        // Delivering a generated file writes a second record for it, and this
+        // one describes the delivery. Carry the generation forward or the last
+        // record wins downstream and the artifact reads as having no prompt.
+        ...this.generationMetadataFor(params.workspaceId, inputId, absolutePath),
         origin_type: "runtime_tool",
         change_type: "delivered",
         tool_id: "send_file",

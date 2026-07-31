@@ -14,6 +14,7 @@ export type KnownRunnerEventType =
   | "skill_invocation"
   | "auto_compaction_start"
   | "auto_compaction_end"
+  | "auto_retry_start"
   | "mcp_server_unavailable"
   | "run_completed"
   | "run_failed";

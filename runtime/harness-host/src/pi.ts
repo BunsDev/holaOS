@@ -21,9 +21,9 @@ import {
   type LoadSkillsResult,
   type Skill,
   type ToolDefinition,
-} from "@mariozechner/pi-coding-agent";
-import type { ImageContent, TextContent } from "@mariozechner/pi-ai";
-import type { ResourceDiagnostic } from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-coding-agent";
+import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
+import type { ResourceDiagnostic } from "@earendil-works/pi-coding-agent";
 import { APIError as OpenAIApiError } from "openai";
 import { createCallResult, createRuntime, type Runtime as McporterRuntime, type ServerDefinition } from "mcporter";
 import {
@@ -32,7 +32,7 @@ import {
   readPiMcpToolCache,
   writePiMcpToolCache,
 } from "./pi-mcp-tool-cache.js";
-import { MODELS } from "../node_modules/@mariozechner/pi-ai/dist/models.generated.js";
+import { MODELS } from "../node_modules/@earendil-works/pi-ai/dist/models.generated.js";
 import {
   DEFAULT_HARNESS_MAX_EXCERPT_LINES,
   DEFAULT_HARNESS_MAX_INLINE_IMAGE_BYTES,
@@ -110,6 +110,8 @@ import {
 } from "./harness-ai-monitoring.js";
 import { createPiFindToolDefinition } from "./pi-find-tool.js";
 import { createPiDocumentReadToolDefinitions } from "./pi-document-read-tool.js";
+import { downscaleInlineImage } from "./image-downscale.js";
+import { wrapToolWithImageCap } from "./tool-image-cap.js";
 import { createPiSearchToolDefinition } from "./pi-search-tool.js";
 import { installBenignStdioEpipeGuard } from "./stdio-epipe.js";
 import {
@@ -179,10 +181,12 @@ export type PiEventMapperState = {
   skillMetadataByAlias: ReadonlyMap<string, PiSkillMetadata>;
   terminalState: "completed" | "failed" | null;
   waitingForUser: boolean;
-  /** A retryable assistant error that pi will attempt to recover from.
-   *  Held back from emission until pi confirms outcome (auto_retry_end
-   *  success=false → promote; successful subsequent message_end →
-   *  clear; agent_end without observed retry → fallback promote). */
+  /** A retryable OR context-overflow assistant error that pi will attempt
+   *  to recover from (a transient retry scheduled via setTimeout, or inline
+   *  auto-compaction). Held back from emission until pi confirms outcome
+   *  (auto_retry_end success=false → promote; successful subsequent
+   *  message_end → clear; sendUserMessage settling with it still pending →
+   *  fallback promote). */
   pendingRetryableFailure: PendingRetryableFailure | null;
 };
 
@@ -1084,7 +1088,7 @@ async function loadPrepareCompactionFn():
   }
   cachedPrepareCompactionFnPromise = (async () => {
     try {
-      const packageEntry = require.resolve("@mariozechner/pi-coding-agent");
+      const packageEntry = require.resolve("@earendil-works/pi-coding-agent");
       const modulePath = path.join(
         path.dirname(packageEntry),
         "core",
@@ -1755,6 +1759,89 @@ function measureToolContentBytes(result: unknown): number {
   return total;
 }
 
+const DEFAULT_SESSION_IMAGE_CONTEXT_BUDGET_BYTES = 16 * 1024 * 1024;
+
+/**
+ * Evict the oldest inline images from the live transcript once their cumulative
+ * base64 size exceeds the budget. pi retains every screenshot and read-image at
+ * full resolution for the life of the session, so a browser-heavy run accumulates
+ * 100MB+ of base64 image data. That pushes the provider request past its hard
+ * ~30MB request-size ceiling (413 request_too_large) — and, worse, makes
+ * auto-compaction fail too, because the summary request carries the same
+ * oversized history (compaction cannot compress a payload it cannot transmit). We
+ * keep the most RECENT images (the ones the current turn is most likely to need)
+ * and swap older ones for a short text placeholder so every request stays
+ * sendable. Reads and writes go through the supported `session.state.messages`
+ * accessor; the swap is idempotent, so it can run before every turn cheaply.
+ * Returns the number of images elided (0 = nothing changed).
+ */
+export function capSessionImageContext(
+  session: unknown,
+  budgetBytes: number = envBytes(
+    "HOLABOSS_SESSION_IMAGE_CONTEXT_BUDGET_BYTES",
+    DEFAULT_SESSION_IMAGE_CONTEXT_BUDGET_BYTES,
+  ),
+): number {
+  const state = isRecord(session) ? (session as { state?: unknown }).state : undefined;
+  if (!isRecord(state)) {
+    return 0;
+  }
+  let messages: unknown;
+  try {
+    messages = (state as { messages?: unknown }).messages;
+  } catch {
+    return 0;
+  }
+  if (!Array.isArray(messages) || messages.length === 0) {
+    return 0;
+  }
+  let cumulativeBytes = 0;
+  let elided = 0;
+  // Walk newest -> oldest so the freshest images fill the budget first and
+  // survive; the images swapped out are always the older ones.
+  const next = messages.slice();
+  for (let i = next.length - 1; i >= 0; i -= 1) {
+    const message = next[i];
+    const content = isRecord(message) ? message.content : undefined;
+    if (!Array.isArray(content)) {
+      continue;
+    }
+    let changed = false;
+    const newContent = content.map((block) => {
+      if (
+        !isRecord(block) ||
+        block.type !== "image" ||
+        typeof block.data !== "string"
+      ) {
+        return block;
+      }
+      const bytes = block.data.length;
+      if (cumulativeBytes + bytes <= budgetBytes) {
+        cumulativeBytes += bytes;
+        return block;
+      }
+      changed = true;
+      elided += 1;
+      const placeholder: TextContent = {
+        type: "text",
+        text: `[image omitted — ~${Math.round(bytes / 1024)}KB elided to keep the conversation within the model's request-size limit]`,
+      };
+      return placeholder;
+    });
+    if (changed) {
+      next[i] = { ...(message as Record<string, unknown>), content: newContent };
+    }
+  }
+  if (elided > 0) {
+    try {
+      (state as { messages: unknown }).messages = next;
+    } catch {
+      return 0;
+    }
+  }
+  return elided;
+}
+
 function safeToolFilenamePart(value: string): string {
   return value.replace(SAFE_TOOL_NAME_PART_REGEXP, "_").slice(0, 80) || "tool";
 }
@@ -1788,6 +1875,55 @@ function writeToolOverflowFile(params: {
   } catch {
     return null;
   }
+}
+
+/**
+/**
+ * Downscale any inline images a tool returns BEFORE they enter the model context.
+ * Screenshots (browser tools) and read-in images (document-read) arrive at full
+ * resolution — a handful in a single turn pushes the request past the provider's
+ * ~30MB size ceiling (413 request_too_large) mid-loop, which no end-of-turn
+ * pruning can prevent. Running at the tool-result source protects the within-turn
+ * LLM calls too, and unlike eviction it keeps the image usable (just smaller), so
+ * it is safe to apply to the current turn's own screenshots. Best-effort per
+ * image: a decode/encode failure leaves that image untouched.
+ */
+export function wrapToolWithImageDownscale<
+  TTool extends { name: string; execute: (...args: any[]) => Promise<any> },
+>(tool: TTool): TTool {
+  const originalExecute = tool.execute.bind(tool);
+  const wrapped: TTool = {
+    ...tool,
+    execute: (async (...args: any[]) => {
+      const result = await originalExecute(...args);
+      if (!isRecord(result) || !Array.isArray(result.content)) {
+        return result;
+      }
+      let changed = false;
+      const content = await Promise.all(
+        result.content.map(async (block: unknown) => {
+          if (
+            !isRecord(block) ||
+            block.type !== "image" ||
+            typeof block.data !== "string"
+          ) {
+            return block;
+          }
+          const downscaled = await downscaleInlineImage(block.data);
+          if (!downscaled) {
+            return block;
+          }
+          changed = true;
+          return { ...block, data: downscaled.data, mimeType: downscaled.mimeType };
+        }),
+      );
+      if (!changed) {
+        return result;
+      }
+      return { ...result, content };
+    }) as TTool["execute"],
+  };
+  return wrapped;
 }
 
 /**
@@ -2527,7 +2663,7 @@ function resolvePiModelProfile(request: HarnessHostPiRequest) {
   });
 }
 
-function configurePiPromptCacheRetention(request: HarnessHostPiRequest): () => void {
+export function configurePiPromptCacheRetention(request: HarnessHostPiRequest): () => void {
   if (resolvePiModelProfile(request).api !== "openai-responses") {
     return () => {};
   }
@@ -2864,37 +3000,50 @@ async function defaultCreateSession(request: HarnessHostPiRequest): Promise<PiSe
   // piling onto the context (bounds long browser/tool-heavy sessions).
   const toolOutputCapState = createToolOutputCapState();
   const tools = baseTools.map((tool) =>
-    // Outermost: one wall-clock deadline over the whole tool-call chain, so a
-    // runaway `bash` (e.g. `find /`) can't freeze the session for hours.
-    wrapToolWithTimeout(
-      wrapToolWithOutputCap(
-        wrapToolWithSkillWidening(
-          // Innermost: only the real spawn sees the temp-script rewrite; the
-          // skill-widening and output-cap layers above still see the original command.
-          wrapBashToolForWindowsCommandLimit(tool),
-          skillWideningState,
-        ),
-        agentCwd,
-        toolOutputCapState,
+    // Outermost: downscale any inline images the tool returns (in-process via
+    // @napi-rs/canvas) before they reach the model, so an image-heavy turn stays
+    // under the provider request-size limit. A cumulative backstop lives in
+    // capSessionImageContext, which evicts older images once the session's image
+    // bytes exceed the budget.
+    wrapToolWithImageCap(
+      // One wall-clock deadline over the whole tool-call chain, so a runaway
+      // `bash` (e.g. `find /`) can't freeze the session for hours.
+      wrapToolWithTimeout(
+        wrapToolWithOutputCap(
+          wrapToolWithSkillWidening(
+            // Innermost: only the real spawn sees the temp-script rewrite; the
+            // skill-widening and output-cap layers above still see the original command.
+            wrapBashToolForWindowsCommandLimit(tool),
+            skillWideningState,
+          ),
+          agentCwd,
+          toolOutputCapState,
+        )
       )
     )
   );
   const customTools = [
     ...nonSkillCustomTools.map((tool) =>
-      wrapToolWithTimeout(
-        wrapToolWithOutputCap(
-          wrapToolWithSkillWidening(tool, skillWideningState),
-          agentCwd,
-          toolOutputCapState,
+      // Browser screenshots + read-in images flow through here — downscale at
+      // the source so the within-turn requests stay sendable.
+      wrapToolWithImageCap(
+        wrapToolWithTimeout(
+          wrapToolWithOutputCap(
+            wrapToolWithSkillWidening(tool, skillWideningState),
+            agentCwd,
+            toolOutputCapState,
+          )
         )
       )
     ),
     ...skillTools.map((tool) =>
-      wrapToolWithTimeout(
-        wrapToolWithOutputCap(
-          tool,
-          agentCwd,
-          toolOutputCapState,
+      wrapToolWithImageCap(
+        wrapToolWithTimeout(
+          wrapToolWithOutputCap(
+            tool,
+            agentCwd,
+            toolOutputCapState,
+          )
         )
       )
     ),
@@ -2916,8 +3065,12 @@ async function defaultCreateSession(request: HarnessHostPiRequest): Promise<PiSe
         resourceLoader,
         sessionManager,
         settingsManager,
-        tools,
-        customTools,
+        // pi 0.80: `tools` is a name ALLOWLIST, not tool definitions. Disable pi's
+        // builtin read/bash/edit/write with `noTools: "builtin"` and pass ALL our
+        // tools — our own wrapped coding tools (createCodingTools minus read) plus
+        // the custom tools — through `customTools`. (0.66 → 0.80 break.)
+        noTools: "builtin",
+        customTools: [...tools, ...customTools],
       })
     ));
   } catch (error) {
@@ -3091,17 +3244,6 @@ function normalizeAssistantFailureMessage(errorMessage: unknown, content: unknow
   );
 }
 
-/** Mirrors `pi-coding-agent`'s `_isRetryableError` regex so the mapper
- *  defers terminal failure for exactly the cases pi will internally
- *  retry. Source: `@mariozechner/pi-coding-agent/dist/core/agent-session.js`
- *  `_isRetryableError`. Keep in sync on pi upgrades. */
-function isPiRetryableErrorMessage(message: string | null | undefined): boolean {
-  if (!message) return false;
-  return /overloaded|provider.?returned.?error|rate.?limit|too many requests|429|499|500|502|503|504|service.?unavailable|server.?error|internal.?error|network.?error|connection.?error|connection.?refused|other side closed|fetch failed|upstream.?connect|reset before headers|socket hang up|ended without|stream.?closed|timed? out|timeout|terminated|retry delay/i.test(
-    message
-  );
-}
-
 function maybeMapAssistantTerminalFailure(
   event: AgentSessionEvent,
   sessionFile: string,
@@ -3126,46 +3268,59 @@ function maybeMapAssistantTerminalFailure(
   const model = optionalTrimmedString(message.model) ?? null;
   const upstream = stopReason === "error" ? peekLatestUpstreamError({ withinMs: 60_000 }) : null;
   const failureMessage = enrichFailureMessageWithUpstream(baseFailureMessage, upstream);
-  // Retryable assistant errors (transient stream termination, provider
-  // overload, 5xx, etc.) are NOT promoted to run_failed here. pi schedules
-  // its own retry via setTimeout(agent.continue, 0) right after firing
-  // this message_end/turn_end. Emitting run_failed eagerly marks the run
-  // terminally failed, which causes the subagent runner to tear down the
-  // harness before pi's retry continuation actually runs — so retries
-  // never get a chance to recover. Instead we stash the failure and
-  // promote it at one of three later checkpoints:
-  //   - successful subsequent assistant message_end → clear (recovered)
-  //   - auto_retry_end with success=false → emit run_failed (exhausted)
-  //   - sendUserMessage resolves while the failure is still pending and
-  //     no retry outcome was observed → emit run_failed (fallback for
-  //     the case our regex matched but pi never actually retried)
-  if (stopReason === "error" && isPiRetryableErrorMessage(failureMessage)) {
-    state.pendingRetryableFailure = {
-      message: failureMessage,
-      stopReason,
-      provider,
-      model,
-      event: event.type,
-    };
-    return [];
-  }
-  state.terminalState = "failed";
-  return [
-    {
-      event_type: "run_failed",
-      payload: {
-        type: stopReason === "aborted" ? "AbortError" : "ProviderError",
-        message: failureMessage,
-        stop_reason: stopReason,
-        provider,
-        model,
-        event: event.type,
-        source: "pi",
-        harness_session_id: sessionFile,
-        ...providerHttpPayloadFromCapture(upstream),
+
+  // An ABORT is unambiguously terminal — the user cancelled and pi will not
+  // recover — so fail it eagerly, preserving the AbortError type. (The deferred
+  // path below always types failures as ProviderError via
+  // buildPendingFailureRunFailed, so an abort must not flow through it.)
+  if (stopReason === "aborted") {
+    state.terminalState = "failed";
+    return [
+      {
+        event_type: "run_failed",
+        payload: {
+          type: "AbortError",
+          message: failureMessage,
+          stop_reason: stopReason,
+          provider,
+          model,
+          event: event.type,
+          source: "pi",
+          harness_session_id: sessionFile,
+          ...providerHttpPayloadFromCapture(upstream),
+        },
       },
-    },
-  ];
+    ];
+  }
+
+  // Every ERROR is deferred — we do NOT try to predict whether pi will recover.
+  // pi's own loop is the single source of truth for the verdict; we stash the
+  // failure and let pi's ACTUAL outcome resolve it:
+  //   - a successful subsequent assistant message_end → clear (recovered).
+  //     Covers pi's transient retry (setTimeout agent.continue) AND its inline
+  //     overflow compaction (_runAutoCompaction("overflow") → agent.continue).
+  //   - auto_retry_end{success:false} → run_failed (retries exhausted).
+  //   - the sendUserMessage promise settling with the failure still pending →
+  //     run_failed. This is the guaranteed backstop for EVERY terminal error —
+  //     a plain non-retryable error, or an exhausted overflow (pi emits
+  //     compaction_end{willRetry:false} and ends the loop) — since none of
+  //     those produce a success message_end to clear the pending failure. The
+  //     settle path (buildPendingFailureRunFailed) carries the full metadata.
+  //
+  // This retired the hand-copied isPiRetryableErrorMessage regex, which
+  // mirrored pi's private _isRetryableError and repeatedly drifted (it missed
+  // "stream ended before message_stop" after the @earendil 0.80.2 migration,
+  // then every context-overflow pattern). By observing pi's outcome instead of
+  // predicting it, the desktop harness now resolves terminal state the same way
+  // the backend agent operator does — from pi's real result, not a mirror.
+  state.pendingRetryableFailure = {
+    message: failureMessage,
+    stopReason,
+    provider,
+    model,
+    event: event.type,
+  };
+  return [];
 }
 
 function buildPendingFailureRunFailed(
@@ -3440,6 +3595,32 @@ function mapPiEvent(
           },
         },
       ];
+    case "auto_retry_start":
+      // A dedicated (mapped) signal that pi is retrying the failed last message
+      // in-turn — it has removed that message from its own state (slice(0, -1))
+      // and will re-stream it. Consumers that accumulate the live delta stream
+      // (the desktop renderer, the api-server executor) key off this to discard
+      // the failed attempt's partial output so the retried stream doesn't
+      // concatenate onto the truncated one ("The answer is 4" + "The answer is
+      // 42."). Mirrors how compaction is surfaced as auto_compaction_start; it
+      // does NOT touch terminal state (the pending failure still resolves via a
+      // successful message_end / auto_retry_end / the settle fallback).
+      return [
+        nativeEvent,
+        {
+          event_type: "auto_retry_start",
+          payload: {
+            attempt: typeof event.attempt === "number" ? event.attempt : null,
+            max_attempts:
+              typeof event.maxAttempts === "number" ? event.maxAttempts : null,
+            delay_ms: typeof event.delayMs === "number" ? event.delayMs : null,
+            error_message:
+              typeof event.errorMessage === "string" ? event.errorMessage : null,
+            event: "auto_retry_start",
+            source: "pi",
+          },
+        },
+      ];
     case "auto_retry_end": {
       // pi emits auto_retry_end ONLY when retries are exhausted
       // (success=false). If a stashed pending failure exists, promote
@@ -3556,6 +3737,10 @@ export async function runPi(request: HarnessHostPiRequest, deps: PiDeps = defaul
       return;
     }
     try {
+      // Compaction sends the full history to be summarized, so an image-bloated
+      // transcript would 413 the compaction request just like the turn did. Prune
+      // oversized inline images first so the summary request stays sendable.
+      capSessionImageContext(session);
       await session.compact();
     } catch (error) {
       console.warn("pi end-of-turn compaction failed (non-fatal)", {
@@ -3678,6 +3863,23 @@ export async function runPi(request: HarnessHostPiRequest, deps: PiDeps = defaul
     },
     async (span) => {
       try {
+        // A resumed session can already be over the provider request-size limit
+        // (a browser-heavy run accumulates 100MB+ of full-res screenshots). Prune
+        // oversized inline images BEFORE the first request of the turn, so an
+        // already-bloated session doesn't 413 on send — and so pi's own overflow
+        // compaction, if it fires, has a sendable payload to summarize.
+        // LOAD-BEARING — do not remove. The persisted session is never rewritten
+        // (append-only JSONL; the finally-path cap below only slims in-memory state,
+        // which is discarded when this per-turn process exits), so a resumed turn
+        // reloads the original full-res images from disk. This pre-turn re-elision
+        // is the only thing that keeps an image-bloated session under the ceiling on
+        // every resume; dropping it silently reintroduces the 413 / stuck hang.
+        const elidedBeforeTurn = capSessionImageContext(handle.session);
+        if (elidedBeforeTurn > 0) {
+          console.warn(
+            `[pi] elided ${elidedBeforeTurn} oversized inline image(s) from the transcript before this turn to stay under the provider request-size limit`,
+          );
+        }
         await handle.session.sendUserMessage(await promptContentForRequest(request));
         const retryable = handle.session as unknown as {
           isRetrying?: boolean;
@@ -3801,6 +4003,21 @@ export async function runPi(request: HarnessHostPiRequest, deps: PiDeps = defaul
         });
         return 1;
       } finally {
+        // Prune oversized inline images on every exit path — including a turn that
+        // failed on an oversized request (413). NOTE: this only slims THIS process's
+        // in-memory transcript (state.messages) — it does NOT shrink the persisted
+        // session. Persistence is append-only (the library never rewrites the JSONL),
+        // dispose() does not write state back to disk, and a resumed turn rebuilds
+        // state.messages from the persisted JSONL, which still holds the original
+        // full-res images. So this call is harmless in-process cleanup only; the
+        // durable protection comes from the pre-turn cap above (see line ~3848),
+        // which re-elides the reloaded full-res images at the start of every resumed
+        // turn. Best-effort; must never throw here.
+        try {
+          capSessionImageContext(handle.session);
+        } catch {
+          // cleanup must not mask the turn's real outcome
+        }
         if (timeoutHandle) {
           clearTimeout(timeoutHandle);
         }

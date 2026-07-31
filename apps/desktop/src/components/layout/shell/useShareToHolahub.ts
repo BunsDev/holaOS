@@ -14,7 +14,17 @@ import { useOpenDiscover } from "./useOpenDiscover";
 // change and main's warm-reopen short-circuits), so a second share would never
 // re-mount the compose gate. A per-share nonce forces a fresh navigation → the
 // gate re-mounts and consumes the newly staged draft.
-let shareNonce = 0;
+//
+// Clock-based, not a counter: a counter lives only as long as this module, so a
+// renderer reload restarts it at 1 and the next share re-uses a nonce the
+// still-warm surface has already consumed — it then skips the new draft and
+// leaves the previous one on screen. The suffix keeps two shares inside the same
+// millisecond apart.
+let shareSeq = 0;
+function nextShareNonce(): string {
+  shareSeq += 1;
+  return `${Date.now()}-${shareSeq}`;
+}
 
 /**
  * Share a desktop output (an assistant turn) to HolaHub: stage the draft with
@@ -64,14 +74,21 @@ export function useShareToHolahub() {
         videos,
         items: input.items ?? [],
         ...(input.form ? { form: input.form } : {}),
-        ...(input.recipe?.prompt.trim() ? { recipe: input.recipe } : {}),
+        // Any one field is worth carrying: a conversation share knows the model
+        // but has no prompt, and a quick share knows only what generated the
+        // artifact. Gating on the prompt dropped both on the floor.
+        ...(input.recipe &&
+        (input.recipe.prompt.trim() ||
+          input.recipe.model.trim() ||
+          input.recipe.outputModel.trim())
+          ? { recipe: input.recipe }
+          : {}),
         source: "desktop_chat",
         ...(sessionTurns.length > 0 ? { session: { turns: sessionTurns } } : {}),
       };
       try {
         await window.electronAPI.holahub.stageShare(draft);
-        shareNonce += 1;
-        openDiscover(`/compose?share=${shareNonce}`);
+        openDiscover(`/compose?share=${nextShareNonce()}`);
       } catch {
         // Not running inside the desktop host — no-op.
       }

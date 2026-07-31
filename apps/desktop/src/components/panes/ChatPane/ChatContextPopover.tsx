@@ -1,17 +1,15 @@
 import { useQuery } from "@tanstack/react-query";
 import { useAtomValue } from "jotai";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
   discoverEnabledAtom,
   selectedSessionIdAtom,
 } from "@/components/layout/shell/state/ui";
 import { useShareToHolahub } from "@/components/layout/shell/useShareToHolahub";
 import {
-  Check,
   ChevronRight,
   Inbox,
   Layers,
-  Loader2,
   Upload,
 } from "@/components/ui/icons";
 import {
@@ -36,12 +34,13 @@ import {
 import { cn } from "@/lib/utils";
 import { useWorkspaceSelection } from "@/lib/workspaceSelection";
 import { OutputArtifactIcon } from "./ArtifactBrowserModal";
+import { ShareGalleryDialog } from "./AssistantTurn/ShareGalleryDialog";
 import {
   gatherShareAttributionItems,
   gatherShareImages,
   gatherShareVideos,
   isShareableMediaOutput,
-  MAX_SHARE_IMAGES,
+  mergeOutputsByPath,
 } from "./AssistantTurn/shareCapture";
 
 const MAX_PREVIEW_OUTPUTS = 6;
@@ -79,44 +78,32 @@ function useChatContextData(): ChatContextData {
   };
 }
 
-/** The Outputs + Sources body, shared by the pinned card and the popover. */
-function ChatContextSections({
-  data,
-  onOpenAll,
-}: {
-  data: ChatContextData;
-  onOpenAll?: () => void;
-}) {
+/**
+ * Sharing this session's artifacts. Its dialog must be rendered OUTSIDE the
+ * popover: opening it moves focus out, which dismisses the popover and would
+ * take the dialog down with it — hence a hook the two layouts mount themselves.
+ */
+function useOutputShare(outputs: OutputItem[]) {
   const { selectedWorkspaceId } = useWorkspaceSelection();
   const shareToHolahub = useShareToHolahub();
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [sharing, setSharing] = useState(false);
-  const preview = data.outputs.slice(0, MAX_PREVIEW_OUTPUTS);
-  // Which previewed outputs can be attached to a HolaHub post (images/videos).
-  const shareableIds = new Set(
-    preview.filter((o) => isShareableMediaOutput(o)).map((o) => o.id),
-  );
+  const [galleryOpen, setGalleryOpen] = useState(false);
   // Sharing to the community is hidden until the user opts in.
   const discoverEnabled = useAtomValue(discoverEnabledAtom);
-  const canSelect = discoverEnabled && shareableIds.size > 0;
 
-  const toggleSelect = (id: string) => {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-      } else if (next.size < MAX_SHARE_IMAGES) {
-        next.add(id);
-      }
-      return next;
-    });
-  };
+  // The whole session's shareable artifacts, not just the previewed few — the
+  // gallery is the picker, so it shouldn't inherit the list's preview cap.
+  const shareableOutputs = useMemo(
+    () => mergeOutputsByPath(outputs.filter((o) => isShareableMediaOutput(o))),
+    [outputs],
+  );
 
-  const shareSelected = () => {
-    if (selectedIds.size === 0 || sharing) {
+  const shareChosen = (picked: WorkspaceOutputRecordPayload[]) => {
+    const pickedIds = new Set(picked.map((o) => o.id));
+    const chosen = shareableOutputs.filter((o) => pickedIds.has(o.id));
+    if (chosen.length === 0 || sharing) {
       return;
     }
-    const chosen = data.outputs.filter((o) => selectedIds.has(o.id));
     // Seed the composer's "Draft with AI" with what was picked (their labels) —
     // this session share has no turn text, so without it the button hides.
     const sourceText = chosen
@@ -135,10 +122,38 @@ function ChatContextSections({
           videos,
           items: gatherShareAttributionItems(chosen),
         });
-        setSelectedIds(new Set());
+        setGalleryOpen(false);
       })
       .finally(() => setSharing(false));
   };
+
+  return {
+    canShare: discoverEnabled && shareableOutputs.length > 0,
+    openGallery: () => setGalleryOpen(true),
+    galleryProps: {
+      onConfirm: shareChosen,
+      onOpenChange: setGalleryOpen,
+      open: galleryOpen,
+      outputs: shareableOutputs,
+      sharing,
+      workspaceId: selectedWorkspaceId ?? null,
+    },
+  };
+}
+
+/** The Outputs + Sources body, shared by the pinned card and the popover. */
+function ChatContextSections({
+  data,
+  onOpenAll,
+  canShare,
+  onShare,
+}: {
+  data: ChatContextData;
+  onOpenAll?: () => void;
+  canShare: boolean;
+  onShare: () => void;
+}) {
+  const preview = data.outputs.slice(0, MAX_PREVIEW_OUTPUTS);
 
   return (
     <>
@@ -149,72 +164,51 @@ function ChatContextSections({
             ? { label: `All ${data.outputs.length}`, onClick: onOpenAll }
             : undefined
         }
+        trailing={
+          canShare ? (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <button
+                    aria-label="Share outputs to HolaHub"
+                    className="grid size-5 place-items-center rounded text-muted-foreground transition-colors hover:bg-fg-6 hover:text-foreground"
+                    onClick={onShare}
+                    type="button"
+                  />
+                }
+              >
+                <Upload className="size-3.5" strokeWidth={1.75} />
+              </TooltipTrigger>
+              <TooltipContent className="py-1" side="bottom">
+                Share to HolaHub
+              </TooltipContent>
+            </Tooltip>
+          ) : null
+        }
       >
         {preview.length === 0 ? (
           <EmptyHint icon={<Inbox className="size-3.5" />} text="No outputs yet" />
         ) : (
           <ul className="flex flex-col gap-px">
-            {preview.map((output, index) => {
-              const selectable = shareableIds.has(output.id);
-              const selected = selectedIds.has(output.id);
-              return (
-                <li
-                  className={cn(
-                    "flex items-center gap-1.5 rounded-md pr-1 transition-colors",
-                    selected ? "bg-primary/[0.07]" : "hover:bg-fg-6",
-                  )}
-                  key={`${outputDisplayLabel(output)}-${index}`}
+            {preview.map((output, index) => (
+              <li
+                className="flex items-center rounded-md transition-colors hover:bg-fg-6"
+                key={`${outputDisplayLabel(output)}-${index}`}
+              >
+                <button
+                  className="flex min-w-0 flex-1 items-center gap-2.5 px-2 py-1.5 text-left"
+                  onClick={() => data.openOutput(output)}
+                  type="button"
                 >
-                  {canSelect ? (
-                    <button
-                      aria-checked={selected}
-                      aria-label={selected ? "Deselect" : "Select to share"}
-                      className={cn(
-                        "ml-2 grid size-4 shrink-0 place-items-center rounded border transition-colors",
-                        selectable
-                          ? selected
-                            ? "border-primary bg-primary text-primary-foreground"
-                            : "border-border text-transparent hover:border-primary/60"
-                          : "invisible",
-                      )}
-                      disabled={!selectable}
-                      onClick={() => toggleSelect(output.id)}
-                      role="checkbox"
-                      type="button"
-                    >
-                      <Check className="size-3" strokeWidth={2.5} />
-                    </button>
-                  ) : null}
-                  <button
-                    className="flex min-w-0 flex-1 items-center gap-2.5 px-2 py-1.5 text-left"
-                    onClick={() => data.openOutput(output)}
-                    type="button"
-                  >
-                    <OutputRowIcon output={output} />
-                    <span className="min-w-0 flex-1 truncate text-sm text-foreground">
-                      {outputDisplayLabel(output)}
-                    </span>
-                  </button>
-                </li>
-              );
-            })}
+                  <OutputRowIcon output={output} />
+                  <span className="min-w-0 flex-1 truncate text-sm text-foreground">
+                    {outputDisplayLabel(output)}
+                  </span>
+                </button>
+              </li>
+            ))}
           </ul>
         )}
-        {discoverEnabled && selectedIds.size > 0 ? (
-          <button
-            className="mt-2 flex h-8 w-full items-center justify-center gap-2 rounded-lg bg-primary px-3 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-60"
-            disabled={sharing}
-            onClick={shareSelected}
-            type="button"
-          >
-            {sharing ? (
-              <Loader2 className="size-4 animate-spin" />
-            ) : (
-              <Upload className="size-4" strokeWidth={1.9} />
-            )}
-            Share {selectedIds.size} to HolaHub
-          </button>
-        ) : null}
       </Section>
     </>
   );
@@ -231,43 +225,52 @@ export function ChatContextPopover({
   onOpen?: () => void;
 }) {
   const data = useChatContextData();
+  const share = useOutputShare(data.outputs);
   return (
-    <Popover
-      onOpenChange={(open) => {
-        if (open) {
-          onOpen?.();
-        }
-      }}
-    >
-      <Tooltip>
-        <PopoverTrigger
-          render={
-            <TooltipTrigger
-              render={
-                <button
-                  type="button"
-                  aria-label="Outputs & sources"
-                  className="relative flex size-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-fg-6 hover:text-foreground data-[popup-open]:bg-fg-8 data-[popup-open]:text-foreground"
-                />
-              }
-            />
+    <>
+      <Popover
+        onOpenChange={(open) => {
+          if (open) {
+            onOpen?.();
           }
-        >
-          <Layers className="size-4" strokeWidth={1.75} />
-          {hasNew ? (
-            <StatusDot
-              variant="primary"
-              size="sm"
-              className="absolute top-1 right-1 border border-card"
-            />
-          ) : null}
-        </PopoverTrigger>
-        <TooltipContent>Outputs &amp; sources</TooltipContent>
-      </Tooltip>
-      <PopoverContent align="end" sideOffset={6} className="w-80 gap-0 p-0">
-        <ChatContextSections data={data} onOpenAll={onOpenAll} />
-      </PopoverContent>
-    </Popover>
+        }}
+      >
+        <Tooltip>
+          <PopoverTrigger
+            render={
+              <TooltipTrigger
+                render={
+                  <button
+                    type="button"
+                    aria-label="Outputs & sources"
+                    className="relative flex size-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-fg-6 hover:text-foreground data-[popup-open]:bg-fg-8 data-[popup-open]:text-foreground"
+                  />
+                }
+              />
+            }
+          >
+            <Layers className="size-4" strokeWidth={1.75} />
+            {hasNew ? (
+              <StatusDot
+                variant="primary"
+                size="sm"
+                className="absolute top-1 right-1 border border-card"
+              />
+            ) : null}
+          </PopoverTrigger>
+          <TooltipContent>Outputs &amp; sources</TooltipContent>
+        </Tooltip>
+        <PopoverContent align="end" sideOffset={6} className="w-80 gap-0 p-0">
+          <ChatContextSections
+            canShare={share.canShare}
+            data={data}
+            onOpenAll={onOpenAll}
+            onShare={share.openGallery}
+          />
+        </PopoverContent>
+      </Popover>
+      <ShareGalleryDialog {...share.galleryProps} />
+    </>
   );
 }
 
@@ -323,10 +326,19 @@ export function ChatContextToggle({
 /** Spacious / canvas layout: the same context pinned as a docked card. */
 export function ChatContextCard({ onOpenAll }: { onOpenAll?: () => void }) {
   const data = useChatContextData();
+  const share = useOutputShare(data.outputs);
   return (
-    <div className="max-h-[70vh] w-80 animate-in overflow-y-auto overscroll-contain rounded-xl border border-border bg-popover text-popover-foreground shadow-lg duration-fast fade-in-0 slide-in-from-right-2 ease-emphasized">
-      <ChatContextSections data={data} onOpenAll={onOpenAll} />
-    </div>
+    <>
+      <div className="max-h-[70vh] w-80 animate-in overflow-y-auto overscroll-contain rounded-xl border border-border bg-popover text-popover-foreground shadow-lg duration-fast fade-in-0 slide-in-from-right-2 ease-emphasized">
+        <ChatContextSections
+          canShare={share.canShare}
+          data={data}
+          onOpenAll={onOpenAll}
+          onShare={share.openGallery}
+        />
+      </div>
+      <ShareGalleryDialog {...share.galleryProps} />
+    </>
   );
 }
 
@@ -347,16 +359,21 @@ function OutputRowIcon({ output }: { output: OutputItem }) {
 function Section({
   label,
   action,
+  trailing,
   children,
 }: {
   label: string;
   action?: { label: string; onClick: () => void };
+  trailing?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
     <div className="px-3 py-3">
-      <div className="flex items-center justify-between px-1 pb-1.5">
-        <span className="text-sm font-medium text-muted-foreground">{label}</span>
+      <div className="flex items-center gap-1 px-1 pb-1.5">
+        <span className="flex-1 text-sm font-medium text-muted-foreground">
+          {label}
+        </span>
+        {trailing}
         {action ? (
           <button
             type="button"

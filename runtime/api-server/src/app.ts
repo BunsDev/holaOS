@@ -6635,14 +6635,26 @@ export function buildRuntimeApiServer(options: BuildRuntimeApiServerOptions = {}
       return sendError(reply, 400, "request body must be an object");
     }
     try {
+      const imageWorkspaceId = requiredCapabilityWorkspaceId({
+        headers: request.headers as Record<string, unknown>,
+        body: request.body,
+      });
+      const imageSessionId = capabilitySessionId({
+        headers: request.headers as Record<string, unknown>,
+        body: request.body,
+      });
       return await runtimeAgentToolsService.generateImage({
-        workspaceId: requiredCapabilityWorkspaceId({
-          headers: request.headers as Record<string, unknown>,
-          body: request.body,
-        }),
-        sessionId: capabilitySessionId({
-          headers: request.headers as Record<string, unknown>,
-          body: request.body,
+        workspaceId: imageWorkspaceId,
+        sessionId: imageSessionId,
+        inputId: resolveOutputInputId({
+          store,
+          workspaceId: imageWorkspaceId,
+          sessionId: imageSessionId ?? "",
+          inputId:
+            capabilityInputId({
+              headers: request.headers as Record<string, unknown>,
+              body: request.body,
+            }) || null,
         }),
         selectedModel: capabilitySelectedModel({
           headers: request.headers as Record<string, unknown>,
@@ -6668,14 +6680,26 @@ export function buildRuntimeApiServer(options: BuildRuntimeApiServerOptions = {}
       const secondsRaw = request.body.seconds;
       const seconds =
         typeof secondsRaw === "number" && Number.isFinite(secondsRaw) ? secondsRaw : undefined;
+      const videoWorkspaceId = requiredCapabilityWorkspaceId({
+        headers: request.headers as Record<string, unknown>,
+        body: request.body,
+      });
+      const videoSessionId = capabilitySessionId({
+        headers: request.headers as Record<string, unknown>,
+        body: request.body,
+      });
       return await runtimeAgentToolsService.generateVideo({
-        workspaceId: requiredCapabilityWorkspaceId({
-          headers: request.headers as Record<string, unknown>,
-          body: request.body,
-        }),
-        sessionId: capabilitySessionId({
-          headers: request.headers as Record<string, unknown>,
-          body: request.body,
+        workspaceId: videoWorkspaceId,
+        sessionId: videoSessionId,
+        inputId: resolveOutputInputId({
+          store,
+          workspaceId: videoWorkspaceId,
+          sessionId: videoSessionId ?? "",
+          inputId:
+            capabilityInputId({
+              headers: request.headers as Record<string, unknown>,
+              body: request.body,
+            }) || null,
         }),
         selectedModel: capabilitySelectedModel({
           headers: request.headers as Record<string, unknown>,

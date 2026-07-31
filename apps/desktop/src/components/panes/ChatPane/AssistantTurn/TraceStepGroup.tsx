@@ -6,6 +6,15 @@ import {
 } from "./status";
 import type { ChatExecutionTimelineItem } from "../types";
 
+// Failed tool steps are hidden from the trace UI. A red error step mid-run
+// reads as "something is broken" to non-technical users even when the agent
+// recovered on its own — so we drop errored steps here rather than styling
+// them. Real terminal failures are still reported by the turn-level status
+// anchor (turnStatus), which owns the "Run failed" label independently.
+function isHiddenTraceItem(item: ChatExecutionTimelineItem): boolean {
+  return item.kind === "trace_step" && item.step.status === "error";
+}
+
 function traceStepsFromExecutionItems(items: ChatExecutionTimelineItem[]) {
   return items
     .filter(
@@ -36,7 +45,8 @@ export function TraceStepGroup({
   onLocalLinkClick?: (href: string) => void;
   forceExpandToken?: number;
 }) {
-  const steps = traceStepsFromExecutionItems(items);
+  const visibleItems = items.filter((item) => !isHiddenTraceItem(item));
+  const steps = traceStepsFromExecutionItems(visibleItems);
   // Default collapsed — even live — so an in-progress turn stays compact.
   // The summary line still reflects live status; users expand to follow.
   const [groupExpanded, setGroupExpanded] = useState(false);
@@ -107,6 +117,13 @@ export function TraceStepGroup({
   const stepLabel = `${stepCount} step${stepCount === 1 ? "" : "s"}`;
   const summaryLabel = stepCount > 0 ? stepLabel : "Details";
 
+  // Nothing left to show once failed steps are filtered out (e.g. a phase that
+  // only contained an errored tool call) — omit the group entirely rather than
+  // render an empty "Details" disclosure.
+  if (visibleItems.length === 0) {
+    return null;
+  }
+
   return (
     <div ref={rootRef} className="mt-3 first:mt-0 min-w-0">
       <button
@@ -134,7 +151,7 @@ export function TraceStepGroup({
           }`}
         >
           <div className="ml-1.5 mt-1.5 space-y-0.5 border-l border-border/60 pl-3.5">
-            {items.map((item) =>
+            {visibleItems.map((item) =>
               item.kind === "thinking" ? (
                 <ExecutionTimelineThinkingEntry
                   key={item.id}

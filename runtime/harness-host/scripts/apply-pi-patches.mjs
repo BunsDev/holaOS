@@ -7,6 +7,16 @@ const rootDir = path.resolve(scriptDir, "..");
 
 function patchFile(relativePath, replacements) {
   const filePath = path.join(rootDir, relativePath);
+  // pi migration spike (@mariozechner → @earendil-works): the old paths no longer
+  // exist. Skip gracefully instead of throwing so `bun install` completes. These
+  // patches (prompt-cache retention, custom compaction prompt) still need to be
+  // re-ported to the @earendil paths + re-verified before this is production-ready.
+  if (!fs.existsSync(filePath)) {
+    console.warn(
+      `[apply-pi-patches] SKIP (not found, re-port to @earendil): ${relativePath}`,
+    );
+    return;
+  }
   let contents = fs.readFileSync(filePath, "utf8");
   let changed = false;
 
