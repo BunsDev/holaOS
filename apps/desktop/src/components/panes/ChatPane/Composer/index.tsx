@@ -22,6 +22,7 @@ import {
   Plus,
   Sparkles,
   Square,
+  Store,
   Upload,
   Wand2,
   X,
@@ -755,8 +756,8 @@ export function Composer({
                     className="gap-2 rounded-md px-2 py-1.5 text-[13px]"
                     onClick={() => openDiscover("/marketplace?type=skill")}
                   >
-                    <Plus className="size-4 text-muted-foreground" />
-                    Browse skills…
+                    <Store className="size-4" />
+                    Browse skills
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   {plusMenuSkillCommands.length > 0 ? (
@@ -791,6 +792,14 @@ export function Composer({
                   Capabilities
                 </DropdownMenuSubTrigger>
                 <DropdownMenuSubContent className="max-h-[320px] min-w-[240px] overflow-y-auto">
+                  <DropdownMenuItem
+                    className="gap-2 rounded-md px-2 py-1.5 text-[13px]"
+                    onClick={() => openDiscover("/marketplace?type=capability")}
+                  >
+                    <Store className="size-4" />
+                    Browse capabilities
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
                   {plusMenuCapabilityCommands.length > 0 ? (
                     plusMenuCapabilityCommands.map((command) => (
                       <DropdownMenuItem

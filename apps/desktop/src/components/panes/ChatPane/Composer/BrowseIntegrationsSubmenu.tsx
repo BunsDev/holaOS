@@ -33,7 +33,7 @@ interface BrowseIntegrationsSubmenuProps {
  * Clicking a row drops an integration mention chip into the composer
  * (closes the menu via default item behavior). Already-connected rows show
  * a trailing Check as an informational marker. Connecting a new toolkit
- * happens in the Marketplace via "Browse integrations" at the bottom.
+ * happens in the Marketplace via "Browse integrations", which leads the list.
  */
 export function BrowseIntegrationsSubmenu({
   onSelectIntegration,
@@ -117,6 +117,13 @@ export function BrowseIntegrationsSubmenu({
 
   return (
     <>
+      {/* First, not last: the list runs to SUBMENU_LIMIT and an entry under all
+          of it is one nobody finds. Matches the Skills submenu. */}
+      <DropdownMenuItem className={COMPACT_ITEM_CLASS} onClick={openBrowse}>
+        <Store className="size-4" />
+        Browse integrations
+      </DropdownMenuItem>
+      <DropdownMenuSeparator className="my-1" />
       {items.map((toolkit) => {
         const isConnected = connectedSlugs.has(toolkit.slug);
         return (
@@ -136,11 +143,6 @@ export function BrowseIntegrationsSubmenu({
           </DropdownMenuItem>
         );
       })}
-      <DropdownMenuSeparator className="my-1" />
-      <DropdownMenuItem className={COMPACT_ITEM_CLASS} onClick={openBrowse}>
-        <Store className="size-4" />
-        Browse integrations
-      </DropdownMenuItem>
     </>
   );
 }
