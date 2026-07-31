@@ -542,10 +542,10 @@ function generationOf(
  * the first one knows the prompt. Left as-is the picker offers the same image
  * twice and a share that lands on the later record reports no generation at all.
  */
-export function mergeOutputsByPath(
-  outputs: ShareableOutput[]
-): ShareableOutput[] {
-  const byPath = new Map<string, ShareableOutput>();
+export function mergeOutputsByPath<T extends ShareableOutput>(
+  outputs: T[]
+): T[] {
+  const byPath = new Map<string, T>();
   const order: string[] = [];
   for (const output of outputs) {
     const key = output.file_path ?? output.id;
@@ -583,8 +583,10 @@ export async function outputRecordsForTurns(
   }
   const batches = await Promise.all(
     inputIds.map((inputId) =>
+      // The runtime is single-tenant and resolves the workspace server-side, so
+      // the contract carries no workspaceId — it is only a guard here.
       remoteApi.outputs
-        .list({ workspaceId, inputId, limit: 50 })
+        .list({ inputId, limit: 50 })
         .then((r) => r.items as ShareableOutput[])
         .catch(() => [] as ShareableOutput[])
     )
@@ -602,10 +604,10 @@ export async function outputRecordsForTurns(
  *
  * Adds nothing: the result is exactly the outputs passed in.
  */
-export function enrichOutputs(
-  outputs: ShareableOutput[],
+export function enrichOutputs<T extends ShareableOutput>(
+  outputs: T[],
   pool: ShareableOutput[]
-): ShareableOutput[] {
+): T[] {
   if (pool.length === 0) {
     return outputs;
   }
