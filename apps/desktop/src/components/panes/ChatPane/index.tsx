@@ -4347,6 +4347,21 @@ export function ChatPane({
     setLiveExecutionItems([]);
   }
 
+  // Reset only the in-progress streamed text for a pi in-turn retry
+  // (auto_retry_start): pi dropped the failed last message from its own state
+  // (slice(0, -1)) and will re-stream it, so discard that attempt's unflushed
+  // partial text. Already-flushed segments from prior messages and the active
+  // message id are kept, so the retried deltas land fresh in the same bubble
+  // instead of concatenating onto the truncated attempt ("The answer is 4" +
+  // "The answer is 42.").
+  function resetLiveOutputForRetry() {
+    cancelLiveAssistantFlush();
+    liveAssistantTextRef.current = "";
+    liveAssistantRevealedRef.current = 0;
+    stopLiveReveal();
+    setLiveAssistantText("");
+  }
+
   function rememberMainSessionEventBatchInput(
     inputId: string,
     payload: Record<string, unknown>,
@@ -6566,6 +6581,25 @@ export function ChatPane({
                 .catch(() => undefined);
             }
           }
+        }
+
+        if (eventType === "auto_retry_start") {
+          // pi is retrying the failed last message in-turn (it dropped that
+          // message from its own state and will re-stream it). Discard the
+          // failed attempt's in-progress streamed text so the retried deltas
+          // don't concatenate onto the truncated partial in the same bubble.
+          resetLiveOutputForRetry();
+          appendStreamTelemetry({
+            streamId: payload.streamId,
+            transportType: payload.type,
+            eventName,
+            eventType,
+            inputId: eventInputId,
+            sessionId: eventSessionId,
+            action: "reset_live_output_on_retry",
+            detail: "auto_retry_start",
+          });
+          return;
         }
 
         if (eventType === "output_delta") {
