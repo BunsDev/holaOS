@@ -41,6 +41,7 @@ import {
   wrapToolWithOutputCap,
   wrapToolWithTimeout,
   toolCallTimeoutMs,
+  PI_AUTO_RETRY_SETTINGS,
   runPi
 } from "./pi.js";
 
@@ -976,6 +977,38 @@ test("mapPiSessionEvent maps auto_retry_start to a dedicated reset signal withou
   });
   assert.equal(state.terminalState, null);
   assert.equal(state.pendingRetryableFailure, null);
+});
+
+test("PI_AUTO_RETRY_SETTINGS rides out a provider blip without outlasting the scheduled-run cadence", () => {
+  // pi's own defaults (3 attempts @ 2000ms base) give a single model request only
+  // ~23s to recover, which kills unattended scheduled runs that have already
+  // claimed external state on a brief provider hiccup.
+  assert.equal(PI_AUTO_RETRY_SETTINGS.enabled, true);
+  assert.equal(PI_AUTO_RETRY_SETTINGS.maxRetries, 10);
+
+  // pi computes `baseDelayMs * 2 ** (attempt - 1)` with NO ceiling, so attempts
+  // and base delay are coupled: raising one without lowering the other explodes
+  // the tail. Keep the whole ladder inside the 15min scheduled-run cadence so a
+  // retrying run can never overlap the next fire.
+  const delaysMs = Array.from(
+    { length: PI_AUTO_RETRY_SETTINGS.maxRetries },
+    (_unused, index) => PI_AUTO_RETRY_SETTINGS.baseDelayMs * 2 ** index
+  );
+  const totalBackoffMs = delaysMs.reduce((sum, delay) => sum + delay, 0);
+  assert.ok(
+    totalBackoffMs < 15 * 60 * 1000,
+    `total auto-retry backoff ${totalBackoffMs}ms must stay under the 15min scheduled cadence`
+  );
+
+  // ...while still covering the first ~16s in more attempts than pi's default 3,
+  // so short blips recover faster than they used to, not slower.
+  const attemptsWithin16s = delaysMs.filter(
+    (_unused, index) => delaysMs.slice(0, index + 1).reduce((sum, d) => sum + d, 0) <= 16_000
+  ).length;
+  assert.ok(
+    attemptsWithin16s > 3,
+    `expected more than pi's default 3 attempts inside 16s, got ${attemptsWithin16s}`
+  );
 });
 
 test("mapPiSessionEvent emits a pi_native_event passthrough for non-streaming Pi session events", () => {

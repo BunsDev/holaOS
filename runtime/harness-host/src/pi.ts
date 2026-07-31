@@ -327,6 +327,26 @@ const PI_MCP_DISCOVERY_MAX_WAIT_MS = 10000;
 // `run_started`. On timeout we treat every server as unavailable and let the
 // run proceed without MCP rather than hang forever.
 const PI_MCP_RUNTIME_OPEN_MAX_WAIT_MS = 15000;
+// pi auto-retries a *retryable* model failure (connection error, 5xx, overload,
+// rate limit — see `_isRetryableError` in pi's agent-session) with exponential
+// backoff, then emits `auto_retry_end{success:false}` → we map that to
+// `run_failed`. pi's defaults are 3 attempts at 2s/4s/8s, i.e. one request gets
+// ~23s to recover. That is tuned for an interactive chat with a human waiting;
+// an unattended scheduled run has usually already claimed external state (a
+// holapool profile lease, a launched browser) by then, so dying on a
+// twenty-second provider blip is expensive.
+//
+// pi computes `baseDelayMs * 2 ** (attempt - 1)` with NO ceiling, so raising the
+// attempt count alone explodes the tail (10 attempts at the 2000ms default would
+// sleep ~34min — longer than the 15min scheduled-run cadence). Dropping the base
+// to 500ms keeps 10 attempts bounded at ~8.5min total (0.5s → 256s), while
+// covering the first ~16s in 5 attempts instead of 3. The backoff sleep is
+// abortable, so an interactive user can still cancel out of the long tail.
+export const PI_AUTO_RETRY_SETTINGS = {
+  enabled: true,
+  maxRetries: 10,
+  baseDelayMs: 500,
+} as const;
 const require = createRequire(import.meta.url);
 let cachedPrepareCompactionFnPromise:
   | Promise<((entries: unknown[], settings: unknown) => PiPrepareCompactionResult) | null>
@@ -2820,6 +2840,7 @@ async function defaultCreateSession(request: HarnessHostPiRequest): Promise<PiSe
     compaction: {
       reserveTokens: compactionReserveTokens,
     },
+    retry: PI_AUTO_RETRY_SETTINGS,
     ...(requestedThinkingBudgets
       ? { thinkingBudgets: requestedThinkingBudgets }
       : {}),
