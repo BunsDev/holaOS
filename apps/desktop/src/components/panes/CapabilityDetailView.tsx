@@ -370,9 +370,9 @@ export function CapabilityDetailView({
         {!installed && (requiredUnmet.length > 0 || mcpUnmet.length > 0) ? (
           <p className="mt-2 text-sm font-medium text-amber-600 dark:text-amber-500">
             {requiredUnmet.length > 0 && mcpUnmet.length > 0
-              ? "Connect the required integrations and MCP servers first"
+              ? "Connect the required connections and MCP servers first"
               : requiredUnmet.length > 0
-                ? "Connect the required integrations first"
+                ? "Connect the required connections first"
                 : "Connect the required MCP servers first"}
           </p>
         ) : null}

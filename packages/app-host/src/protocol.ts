@@ -357,6 +357,10 @@ export interface ShareDraft {
   /** Generated video(s) captured from the turn — same base64+upload path as
    *  images (size-capped upstream to keep IPC sane). */
   videos: ShareDraftImage[];
+  /** Deliverable documents (pptx/docx/xlsx/pdf/…) attached to the post itself.
+   *  They used to need a fabricated one-turn session to travel at all, which
+   *  made a shared deck render and act as a conversation. */
+  files?: ShareDraftFile[];
   /** Session tools resolved to catalog refs, each carrying its origin. */
   items: ShareDraftItem[];
   /** Which share mode produced this draft; absent = a tool-only share. */

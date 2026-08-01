@@ -404,7 +404,7 @@ function AppRowWithMultiBinding({
     tone === "error" && errorMessage
       ? errorMessage
       : tone === "connecting"
-        ? `Authorizing integrations…`
+        ? `Authorizing connections…`
         : tone === "needs_connect"
           ? pendingProviderNames.length > 0
             ? `${pendingProviderNames.join(", ")} not connected — open menu to authorize`
@@ -490,7 +490,7 @@ function AppRowWithMultiBinding({
             </DropdownMenuItem>
             <DropdownMenuItem onClick={() => setDialogOpen(true)}>
               <Link2 className="size-3.5" />
-              Manage integrations
+              Manage connections
               {pendingProviderNames.length > 0 ? (
                 <span className="ml-auto rounded-full bg-warning/15 px-1.5 py-px text-[10px] font-medium text-warning">
                   {pendingProviderNames.length}

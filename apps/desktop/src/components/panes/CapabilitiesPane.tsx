@@ -23,7 +23,7 @@ export function CapabilitiesPane({
             Set up your agent
           </h2>
           <p className="text-sm text-muted-foreground">
-            A capability bundles the skills and connections your agent uses for a
+            A combo bundles the skills and connections your agent uses for a
             kind of work.
           </p>
         </div>
@@ -41,7 +41,7 @@ export function CapabilitiesPane({
             title="Create new skills"
           />
           <SuggestionCard
-            description="Bundle skills and integrations into a reusable combo."
+            description="Bundle skills and connections into a reusable combo."
             icon={Boxes}
             onClick={onCreate}
             title="Create a combo"

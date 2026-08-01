@@ -144,9 +144,9 @@ interface ComposerProps {
   mentionableItems?: ChatComposerMentionItem[];
   onRemoveQuotedIntegration: (slug: string) => void;
   /** Called when the user picks an integration from the +
-   *  dropdown's "Integrations" submenu — drops a mention chip. */
+   *  dropdown's "Connections" submenu — drops a mention chip. */
   onSelectIntegration: (slug: string, name: string) => void;
-  /** When provided (a HolaEmployee chat), the Integrations submenu lists exactly
+  /** When provided (a HolaEmployee chat), the Connections submenu lists exactly
    *  these equipped toolkits instead of the global connected-integrations browser. */
   employeeIntegrations?: { slug: string; name: string }[] | null;
   onRemoveAttachment: (attachmentId: string) => void;
@@ -648,7 +648,7 @@ export function Composer({
                         onRemoveQuotedIntegration(integration.slug)
                       }
                       className="grid size-3.5 place-items-center rounded-sm text-muted-foreground transition hover:bg-fg-8 hover:text-foreground"
-                      aria-label={`Remove integration ${integration.name}`}
+                      aria-label={`Remove connection ${integration.name}`}
                     >
                       <X className="size-2.5" />
                     </button>
@@ -695,7 +695,7 @@ export function Composer({
             <DropdownMenuTrigger
               render={
                 <ComposerIconButton
-                  aria-label="Add attachment or integration"
+                  aria-label="Add attachment or connection"
                   disabled={inputDisabled}
                   className="rounded ring-1 ring-border/50"
                 />
@@ -705,11 +705,12 @@ export function Composer({
             </DropdownMenuTrigger>
             <DropdownMenuContent
               align="start"
+              className="min-w-[252px] p-1.5"
               side={plusMenuSide}
               sideOffset={6}
             >
               <DropdownMenuItem
-                className="gap-2 rounded-md px-2 py-1.5 text-[13px]"
+                className="gap-2.5 rounded-lg px-2.5 py-2 text-[13px]"
                 onClick={() => {
                   setVideoMode(false);
                   setImageMode(true);
@@ -724,7 +725,7 @@ export function Composer({
                 Create image
               </DropdownMenuItem>
               <DropdownMenuItem
-                className="gap-2 rounded-md px-2 py-1.5 text-[13px]"
+                className="gap-2.5 rounded-lg px-2.5 py-2 text-[13px]"
                 onClick={() => {
                   setImageMode(false);
                   setVideoMode(true);
@@ -735,7 +736,7 @@ export function Composer({
                 Create video
               </DropdownMenuItem>
               <DropdownMenuItem
-                className="gap-2 rounded-md px-2 py-1.5 text-[13px]"
+                className="gap-2.5 rounded-lg px-2.5 py-2 text-[13px]"
                 onClick={() => {
                   composerEditorRef.current?.insertSkill("pptx", "Slides");
                   composerEditorRef.current?.focus();
@@ -745,15 +746,15 @@ export function Composer({
                 Create slides
               </DropdownMenuItem>
               <DropdownMenuSub>
-                <DropdownMenuSubTrigger className="gap-2 rounded-md px-2 py-1.5 text-[13px]">
+                <DropdownMenuSubTrigger className="gap-2.5 rounded-lg px-2.5 py-2 text-[13px]">
                   <Feather className="size-4" />
                   Skills
                 </DropdownMenuSubTrigger>
-                <DropdownMenuSubContent className="max-h-[320px] min-w-[240px] overflow-y-auto">
+                <DropdownMenuSubContent className="max-h-[340px] min-w-[268px] overflow-y-auto p-1.5">
                   {/* First, not last: the list scrolls, and an entry below two
                       dozen skills is one nobody finds. */}
                   <DropdownMenuItem
-                    className="gap-2 rounded-md px-2 py-1.5 text-[13px]"
+                    className="gap-2.5 rounded-lg px-2.5 py-2 text-[13px]"
                     onClick={() => openDiscover("/marketplace?type=skill")}
                   >
                     <Store className="size-4" />
@@ -763,7 +764,7 @@ export function Composer({
                   {plusMenuSkillCommands.length > 0 ? (
                     plusMenuSkillCommands.map((command) => (
                       <DropdownMenuItem
-                        className="gap-2 rounded-md px-2 py-1.5 text-[13px]"
+                        className="gap-2.5 rounded-lg px-2.5 py-2 text-[13px]"
                         key={command.skillId}
                         onClick={() =>
                           composerEditorRef.current?.insertSkill(
@@ -778,7 +779,7 @@ export function Composer({
                     ))
                   ) : (
                     <DropdownMenuItem
-                      className="gap-2 rounded-md px-2 py-1.5 text-[13px] text-muted-foreground"
+                      className="gap-2.5 rounded-lg px-2.5 py-2 text-[13px] text-muted-foreground"
                       disabled
                     >
                       No skills installed
@@ -787,23 +788,23 @@ export function Composer({
                 </DropdownMenuSubContent>
               </DropdownMenuSub>
               <DropdownMenuSub>
-                <DropdownMenuSubTrigger className="gap-2 rounded-md px-2 py-1.5 text-[13px]">
+                <DropdownMenuSubTrigger className="gap-2.5 rounded-lg px-2.5 py-2 text-[13px]">
                   <IconifyIcon className="size-4" icon={getCapabilityIcon("")} />
-                  Capabilities
+                  Combos
                 </DropdownMenuSubTrigger>
-                <DropdownMenuSubContent className="max-h-[320px] min-w-[240px] overflow-y-auto">
+                <DropdownMenuSubContent className="max-h-[340px] min-w-[268px] overflow-y-auto p-1.5">
                   <DropdownMenuItem
-                    className="gap-2 rounded-md px-2 py-1.5 text-[13px]"
+                    className="gap-2.5 rounded-lg px-2.5 py-2 text-[13px]"
                     onClick={() => openDiscover("/marketplace?type=capability")}
                   >
                     <Store className="size-4" />
-                    Browse capabilities
+                    Browse combos
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   {plusMenuCapabilityCommands.length > 0 ? (
                     plusMenuCapabilityCommands.map((command) => (
                       <DropdownMenuItem
-                        className="gap-2 rounded-md px-2 py-1.5 text-[13px]"
+                        className="gap-2.5 rounded-lg px-2.5 py-2 text-[13px]"
                         key={command.capabilityId}
                         onClick={() =>
                           composerEditorRef.current?.insertCapability(
@@ -821,25 +822,25 @@ export function Composer({
                     ))
                   ) : (
                     <DropdownMenuItem
-                      className="gap-2 rounded-md px-2 py-1.5 text-[13px] text-muted-foreground"
+                      className="gap-2.5 rounded-lg px-2.5 py-2 text-[13px] text-muted-foreground"
                       disabled
                     >
-                      No capabilities installed
+                      No combos installed
                     </DropdownMenuItem>
                   )}
                 </DropdownMenuSubContent>
               </DropdownMenuSub>
               <DropdownMenuSub>
-                <DropdownMenuSubTrigger className="gap-2 rounded-md px-2 py-1.5 text-[13px]">
+                <DropdownMenuSubTrigger className="gap-2.5 rounded-lg px-2.5 py-2 text-[13px]">
                   <Plug className="size-4" />
-                  Integrations
+                  Connections
                 </DropdownMenuSubTrigger>
-                <DropdownMenuSubContent className="min-w-[240px]">
+                <DropdownMenuSubContent className="min-w-[268px] p-1.5">
                   {employeeIntegrations ? (
                     employeeIntegrations.length > 0 ? (
                       employeeIntegrations.map((it) => (
                         <DropdownMenuItem
-                          className="gap-2 rounded-md px-2 py-1.5 text-[13px]"
+                          className="gap-2.5 rounded-lg px-2.5 py-2 text-[13px]"
                           key={it.slug}
                           onClick={() => onSelectIntegration(it.slug, it.name)}
                         >
@@ -849,10 +850,10 @@ export function Composer({
                       ))
                     ) : (
                       <DropdownMenuItem
-                        className="gap-2 rounded-md px-2 py-1.5 text-[13px] text-muted-foreground"
+                        className="gap-2.5 rounded-lg px-2.5 py-2 text-[13px] text-muted-foreground"
                         disabled
                       >
-                        No integrations connected
+                        No connections yet
                       </DropdownMenuItem>
                     )
                   ) : (
@@ -863,7 +864,7 @@ export function Composer({
                 </DropdownMenuSubContent>
               </DropdownMenuSub>
               <DropdownMenuItem
-                className="gap-2 rounded-md px-2 py-1.5 text-[13px]"
+                className="gap-2.5 rounded-lg px-2.5 py-2 text-[13px]"
                 onClick={() => fileInputRef.current?.click()}
               >
                 <Upload className="size-4" />
@@ -897,7 +898,7 @@ export function Composer({
               </DropdownMenuTrigger>
               <DropdownMenuContent align="start" side="bottom" sideOffset={6}>
                 <DropdownMenuItem
-                  className="gap-2 rounded-md px-2 py-1.5 text-[13px]"
+                  className="gap-2.5 rounded-lg px-2.5 py-2 text-[13px]"
                   onClick={() => onProjectChange(null)}
                 >
                   {selectedProjectId === null ? (
@@ -910,7 +911,7 @@ export function Composer({
                 {projectOptions.map((project) => (
                   <DropdownMenuItem
                     key={project.project_id}
-                    className="gap-2 rounded-md px-2 py-1.5 text-[13px]"
+                    className="gap-2.5 rounded-lg px-2.5 py-2 text-[13px]"
                     onClick={() => onProjectChange(project.project_id)}
                   >
                     {selectedProjectId === project.project_id ? (

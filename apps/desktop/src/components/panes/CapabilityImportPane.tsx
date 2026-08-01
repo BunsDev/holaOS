@@ -48,7 +48,7 @@ export function CapabilityImportPane({
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-6">
         <div className="mx-auto flex w-full max-w-xl flex-col gap-3">
           <p className="text-sm text-muted-foreground">
-            Import a Claude or Codex plugin folder as a capability. Its skills are
+            Import a Claude or Codex plugin folder as a combo. Its skills are
             copied into your workspace; connect any tools it needs afterward.
           </p>
           <Input

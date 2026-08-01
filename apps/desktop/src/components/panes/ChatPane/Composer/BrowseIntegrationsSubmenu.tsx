@@ -18,7 +18,7 @@ const SUBMENU_LIMIT = 6;
 // Compact override for menu items in this surface — base DropdownMenuItem
 // is `rounded-xl px-3 py-2 gap-2.5`, which reads as oversized for a quick
 // quick-connect catalog. tailwind-merge lets the later utilities win.
-const COMPACT_ITEM_CLASS = "rounded-md gap-2 px-2 py-1.5 text-[13px]";
+const COMPACT_ITEM_CLASS = "rounded-lg gap-2.5 px-2.5 py-2 text-[13px]";
 
 interface BrowseIntegrationsSubmenuProps {
   /** Drop an integration mention chip into the composer when clicked. */
@@ -110,7 +110,7 @@ export function BrowseIntegrationsSubmenu({
     return (
       <DropdownMenuItem className={COMPACT_ITEM_CLASS} onClick={openBrowse}>
         <Store className="size-4" />
-        Browse integrations
+        Browse connections
       </DropdownMenuItem>
     );
   }
@@ -121,7 +121,7 @@ export function BrowseIntegrationsSubmenu({
           of it is one nobody finds. Matches the Skills submenu. */}
       <DropdownMenuItem className={COMPACT_ITEM_CLASS} onClick={openBrowse}>
         <Store className="size-4" />
-        Browse integrations
+        Browse connections
       </DropdownMenuItem>
       <DropdownMenuSeparator className="my-1" />
       {items.map((toolkit) => {

@@ -80,7 +80,7 @@ export function AppIntegrationsDialog({
           <div className="flex items-center justify-between border-b border-border px-4 py-3">
             <div className="min-w-0">
               <DialogPrimitive.Title className="truncate text-sm font-medium text-foreground">
-                {appName} integrations
+                {appName} connections
               </DialogPrimitive.Title>
               <DialogPrimitive.Description className="mt-0.5 text-xs text-muted-foreground">
                 {integrations.length} provider

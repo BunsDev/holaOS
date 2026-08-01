@@ -10050,7 +10050,7 @@ export function ChatPane({
                 <span className="font-medium">Waiting for you to connect:</span>{" "}
                 {pendingIntegrationsWait.unresolvedSlugs.length > 0
                   ? pendingIntegrationsWait.unresolvedSlugs.join(", ")
-                  : "the integrations the agent proposed above"}
+                  : "the connections the agent proposed above"}
                 . The next message resumes automatically once all are connected.
               </div>
               {pendingIntegrationsWait.unresolvedSlugs.length > 0 ? (
