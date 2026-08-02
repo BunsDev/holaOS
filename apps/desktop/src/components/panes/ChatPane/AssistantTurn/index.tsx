@@ -10,6 +10,7 @@ import { useShareToHolahub } from "@/components/layout/shell/useShareToHolahub";
 import { useAtomValue } from "jotai";
 import {
   enrichOutputs,
+  gatherQuotedToolItems,
   gatherShareAttributionItems,
   resolveOutputModel,
   gatherShareImages,
@@ -17,7 +18,9 @@ import {
   gatherShareVideos,
   isShareableMediaOutput,
   outputRecordsForTurns,
+  turnsForOutputs,
 } from "./shareCapture";
+import { shareContextAtom } from "./shareContext";
 import type {
   ChatAssistantSegment,
   ChatBackgroundTaskReference,
@@ -274,6 +277,7 @@ function AssistantTurnComponent({
   const hasAnyContent = renderedSegments.length > 0;
   const showActionsMenu = hasAnyContent && !live;
   const shareToHolahub = useShareToHolahub();
+  const shareContext = useAtomValue(shareContextAtom);
   const hasShareMediaOutput = outputs.some(isShareableMediaOutput);
   // Sharing is part of the HolaHub community — hide every entry point until opt-in.
   const discoverEnabled = useAtomValue(discoverEnabledAtom);
@@ -452,7 +456,13 @@ function AssistantTurnComponent({
                           sourceText: copyText,
                           images,
                           videos,
-                          items: gatherShareAttributionItems(ready),
+                          items: [
+                            ...gatherQuotedToolItems(
+                              turnsForOutputs(ready, shareContext.messages),
+                              shareContext.toolNames
+                            ),
+                            ...gatherShareAttributionItems(ready),
+                          ],
                           form: "output",
                           recipe: {
                             prompt: "",

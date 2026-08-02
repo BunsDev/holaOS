@@ -30,6 +30,7 @@ import { billingRpcFetch } from "@/lib/app-sdk-client";
 import { useQuery } from "@tanstack/react-query";
 import {
   enrichOutputs,
+  gatherQuotedToolItems,
   gatherShareAttributionItems,
   resolveOutputModel,
   gatherShareImages,
@@ -37,7 +38,9 @@ import {
   isShareableMediaOutput,
   MAX_SHARE_IMAGES,
   outputRecordsForTurns,
+  turnsForOutputs,
 } from "./shareCapture";
+import { shareContextAtom } from "./shareContext";
 import {
   Tooltip,
   TooltipContent,
@@ -85,6 +88,7 @@ export function AssistantTurnOutputs({
   const { workspaces, installedApps } = useWorkspaceDesktop();
   const { openUrlInBrowserTab } = useOpenWorkspaceOutput();
   const shareToHolahub = useShareToHolahub();
+  const shareContext = useAtomValue(shareContextAtom);
   const [galleryOpen, setGalleryOpen] = useState(false);
   const [sharing, setSharing] = useState(false);
 
@@ -158,7 +162,17 @@ export function AssistantTurnOutputs({
             sourceText: turnText,
             images,
             videos,
-            items: gatherShareAttributionItems(ready),
+            // The skills the reader would need, resolved from the turns that
+            // produced these artifacts — the same way the Share panel does it.
+            // Crediting only the output's module_id sent an image with no skill
+            // attached at all.
+            items: [
+              ...gatherQuotedToolItems(
+                turnsForOutputs(ready, shareContext.messages),
+                shareContext.toolNames
+              ),
+              ...gatherShareAttributionItems(ready),
+            ],
             form: "output",
             recipe: {
               prompt: "",

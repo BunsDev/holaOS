@@ -102,6 +102,7 @@ import { billingRpcFetch } from "@/lib/app-sdk-client";
 import { declineIntegrationProposals, remoteApi } from "@/lib/remoteApiClient";
 import { useAtomValue, useSetAtom } from "jotai";
 import { skillTitlesAtom } from "./Composer/editor/skillTitles";
+import { shareContextAtom } from "./AssistantTurn/shareContext";
 import { recentFilesAtom } from "@/components/layout/shell/state/recentFiles";
 import {
   type ActiveWebAppSurface,
@@ -8831,6 +8832,33 @@ export function ChatPane({
       ),
     [messages, showSessionExecutionInternals],
   );
+
+  const setShareContext = useSetAtom(shareContextAtom);
+  useEffect(() => {
+    setShareContext({
+      messages: displayMessages,
+      toolNames: {
+        skills: Object.fromEntries(
+          [...availableWorkspaceSkillMap.entries()].map(([id, skill]) => [
+            id,
+            skill?.title ?? id,
+          ]),
+        ),
+        integrations: Object.fromEntries(
+          Object.entries(composioToolkitsByProvider).map(([slug, toolkit]) => [
+            slug,
+            toolkit?.name ?? slug,
+          ]),
+        ),
+      },
+    });
+  }, [
+    displayMessages,
+    availableWorkspaceSkillMap,
+    composioToolkitsByProvider,
+    setShareContext,
+  ]);
+
   const lastCompletedAssistantMessageId = useMemo(() => {
     if (showLiveAssistantTurn) {
       return null;
