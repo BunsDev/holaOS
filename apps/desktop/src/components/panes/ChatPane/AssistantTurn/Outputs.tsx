@@ -33,9 +33,10 @@ import {
   gatherQuotedToolItems,
   gatherShareAttributionItems,
   resolveOutputModel,
+  gatherShareFiles,
   gatherShareImages,
   gatherShareVideos,
-  isShareableMediaOutput,
+  isShareableOutput,
   MAX_SHARE_IMAGES,
   outputRecordsForTurns,
   turnsForOutputs,
@@ -97,7 +98,7 @@ export function AssistantTurnOutputs({
     [outputs],
   );
 
-  // Multi-share: when a turn produced ≥2 shareable media artifacts, let the user
+  // Multi-share: when a turn produced ≥2 shareable artifacts, let the user
   // pick a subset and post them together to HolaHub (a single turn-level Share
   // still handles the whole turn from the actions menu).
   // Sharing is part of the HolaHub community — hide every share affordance
@@ -106,12 +107,13 @@ export function AssistantTurnOutputs({
   const shareableOutputIds = new Set(
     cards
       .filter(
-        (card) => card.kind === "output" && isShareableMediaOutput(card.output),
+        (card) => card.kind === "output" && isShareableOutput(card.output),
       )
       .map((card) => (card.kind === "output" ? card.output.id : "")),
   );
-  // Two or more artifacts is a choice, and a choice between pictures belongs in
-  // a gallery rather than a column of filenames with checkboxes.
+  // Two or more artifacts is a choice, and a choice between artifacts belongs in
+  // a gallery rather than a column of filenames with checkboxes. A document has
+  // no thumbnail to show there — the gallery names it instead.
   const pickable = discoverEnabled && shareableOutputIds.size >= 2;
 
   // "Share to win credits": the credits a live campaign grants for sharing an
@@ -130,7 +132,7 @@ export function AssistantTurnOutputs({
     () =>
       cards
         .filter(
-          (card) => card.kind === "output" && isShareableMediaOutput(card.output),
+          (card) => card.kind === "output" && isShareableOutput(card.output),
         )
         .map((card) => (card as { output: WorkspaceOutputRecordPayload }).output),
     [cards],
@@ -157,11 +159,13 @@ export function AssistantTurnOutputs({
         return Promise.all([
           gatherShareImages(ready, workspaceId ?? null),
           gatherShareVideos(ready, workspaceId ?? null),
-        ]).then(([images, videos]) => {
+          gatherShareFiles(ready, workspaceId ?? null),
+        ]).then(([images, videos, files]) => {
           shareToHolahub({
             sourceText: turnText,
             images,
             videos,
+            files,
             // The skills the reader would need, resolved from the turns that
             // produced these artifacts — the same way the Share panel does it.
             // Crediting only the output's module_id sent an image with no skill
