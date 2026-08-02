@@ -5,6 +5,7 @@ import type {
 import { useSetAtom } from "jotai";
 import { persistMediaGenerationModel } from "@/lib/mediaGenerationConfig";
 import { imageComposerModeAtom } from "@/components/panes/ChatPane/Composer/imageMode";
+import { videoComposerModeAtom } from "@/components/panes/ChatPane/Composer/videoMode";
 import { useEffect, useRef } from "react";
 import {
   chatAppContextAttachmentRequestAtom,
@@ -92,6 +93,7 @@ export function useHostOpenChat(): void {
   const setChatPanelView = useSetAtom(chatPanelViewAtom);
   const setComposerPrefill = useSetAtom(chatComposerPrefillAtom);
   const setImageComposerMode = useSetAtom(imageComposerModeAtom);
+  const setVideoComposerMode = useSetAtom(videoComposerModeAtom);
   const setLastViewedMap = useSetAtom(sessionLastViewedAtAtom);
   const setFocusMode = useSetAtom(focusModeAtom);
   const setProjectView = useSetAtom(projectViewAtom);
@@ -135,21 +137,27 @@ export function useHostOpenChat(): void {
         });
       }
 
-      // The image tool takes no model, so reproducing an artifact faithfully
-      // means setting the workspace's image-generation model. Paired with image
-      // mode below, so the model pill in the composer shows what changed rather
-      // than the setting moving silently.
-      const requestedImageModel =
-        typeof payload.input?.imageModel === "string"
-          ? payload.input.imageModel.trim()
-          : "";
-      if (requestedImageModel) {
-        void persistMediaGenerationModel("image", requestedImageModel).catch(
-          () => {
-            // Config unwritable — the session still opens, on the current model.
-          }
-        );
-        setImageComposerMode(true);
+      // Neither media tool takes a model, so reproducing an artifact faithfully
+      // means setting the workspace's generation model for that kind. Paired
+      // with the matching composer mode, so the model pill shows what changed
+      // rather than the setting moving silently — and the other mode is cleared,
+      // the way picking one in the composer clears the other.
+      const requestedMediaModel = (["video", "image"] as const)
+        .map((kind) => {
+          const raw = payload.input?.[`${kind}Model` as const];
+          return {
+            kind,
+            model: typeof raw === "string" ? raw.trim() : "",
+          };
+        })
+        .find((candidate) => candidate.model);
+      if (requestedMediaModel) {
+        const { kind, model } = requestedMediaModel;
+        void persistMediaGenerationModel(kind, model).catch(() => {
+          // Config unwritable — the session still opens, on the current model.
+        });
+        setImageComposerMode(kind === "image");
+        setVideoComposerMode(kind === "video");
       }
 
       // A reference Output rides in as base64 and lands as an ordinary pending

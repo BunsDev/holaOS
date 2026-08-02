@@ -127,6 +127,11 @@ export interface ChatStartInput {
    *  session opens in image mode where the model pill shows it. A remix that
    *  quietly used a different model would not be a remix. */
   imageModel?: string;
+  /** The same, for video. Sent instead of `imageModel`, never alongside it: the
+   *  two composer modes are exclusive, and a video's model in the image slot
+   *  both opens the wrong mode and overwrites a setting it has no business
+   *  touching. */
+  videoModel?: string;
   /** Files to stage on the composer as pending attachments — a Reproduce sends
    *  the shared Output here so the viewer works "from something like this".
    *  They land as ordinary attachments, so removing one is just removing it. */
