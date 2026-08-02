@@ -1109,6 +1109,9 @@ const reportedOperatorSurfaceContexts = new Map<
   ReportedOperatorSurfaceContextPayload
 >();
 const appSurfaceViews = new Map<string, BrowserView>();
+// Surface keys whose last main-frame load failed — a reveal-in-place would pin
+// the error page, so those reopen with a real load instead.
+const appSurfaceLoadFailed = new Set<string>();
 // Identity of each app-surface BrowserView keyed by its webContents.id, so a
 // host-bridge IPC call can be resolved to its owning app WITHOUT trusting ids
 // sent by the (untrusted) hosted page. Set on navigate, cleared on destroy.
@@ -1560,6 +1563,11 @@ const WEB_HOLAAPP_FIRST_PAINT_CHANNEL = "appSurface:content-painted";
 // the renderer on in-surface navigation so the chat copilot knows which page the
 // user is actually viewing. Keep in sync with the preload + electron.d.ts.
 const APP_SURFACE_LOCATION_CHANNEL = "appSurface:location";
+// A surface that failed to show anything. The view is a native BrowserView the
+// renderer only reserves space for, so a load error, a dead renderer or a page
+// that never paints all look identical from the DOM side: blank. Without this
+// the pane has nothing to react to and the user gets a white rectangle.
+const APP_SURFACE_FAILED_CHANNEL = "appSurface:failed";
 // Per-app MCP tool lists are NOT hardcoded. The runtime treats an unspecified allowlist as
 // "all tools from all enabled servers" (runtime/harnesses/src/mcp.ts), so attachWebHolaAppMcp
 // attaches each installed app's server and clears the allowlist — see installedHolaAppIds.
@@ -18116,6 +18124,21 @@ function getOrCreateAppSurfaceView(
       }
     }, 8000);
   });
+  const emitAppSurfaceFailure = (payload: {
+    kind: "load" | "crash" | "blank";
+    code?: number;
+    detail?: string;
+    url?: string;
+  }) => {
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      return;
+    }
+    const identity = appSurfaceIdentity.get(view.webContents.id)?.appId;
+    mainWindow.webContents.send(APP_SURFACE_FAILED_CHANNEL, {
+      appId: identity ?? appId,
+      ...payload,
+    });
+  };
   view.webContents.on(
     "did-fail-load",
     (_e, errorCode, errorDescription, validatedURL, isMainFrame) => {
@@ -18124,9 +18147,19 @@ function getOrCreateAppSurfaceView(
         console.warn(
           `[app-surface] did-fail-load ${errorCode} ${errorDescription} @ ${validatedURL}`,
         );
+        appSurfaceLoadFailed.add(appId);
+        emitAppSurfaceFailure({
+          kind: "load",
+          code: errorCode,
+          detail: errorDescription,
+          url: validatedURL,
+        });
       }
     },
   );
+  view.webContents.on("did-finish-load", () => {
+    appSurfaceLoadFailed.delete(appId);
+  });
   // Push the live location (current page URL + title) to the renderer so the
   // chat copilot knows which page the user is actually viewing — for ANY web
   // HolaApp surface (need-review, gofunds, third-party bundles like Notion).
@@ -18162,7 +18195,10 @@ function getOrCreateAppSurfaceView(
   // crashed app-surface view, so self-heal here: drop the dead entry so the next
   // open recreates it instead of handing back a view whose webContents is gone.
   // Guard on identity so our own destroy path doesn't re-enter.
-  view.webContents.on("render-process-gone", () => {
+  view.webContents.on("render-process-gone", (_e, details) => {
+    // Tell the pane BEFORE the view is dropped — afterwards there is no identity
+    // left to attribute the failure to.
+    emitAppSurfaceFailure({ kind: "crash", detail: details?.reason });
     if (appSurfaceViews.get(appId) === view) {
       destroyAppSurfaceView(appId);
     }
@@ -18315,6 +18351,7 @@ function destroyAppSurfaceView(appId: string): void {
     // best effort
   }
   appSurfaceViews.delete(appId);
+  appSurfaceLoadFailed.delete(appId);
   if (activeAppSurfaceId === appId) {
     activeAppSurfaceId = null;
   }
@@ -18460,6 +18497,12 @@ async function softNavigateAppSurface(
 ): Promise<boolean> {
   const js = `(() => {
     try {
+      // A warm view whose SPA is not mounted — it crashed, it bounced to a
+      // sign-out, it never booted — accepts pushState happily and then renders
+      // nothing. That is the blank pane: the caller treats the soft nav as a
+      // success and never hard-loads. Decline so it does.
+      var mount = document.getElementById("root") || document.body;
+      if (!mount || mount.childElementCount === 0) { return false; }
       var u = new URL(${JSON.stringify(targetUrl)});
       var rel = u.pathname + u.search + u.hash;
       var prev = window.history.state;
@@ -18531,6 +18574,25 @@ async function navigateWebHolaAppSurface(
     return;
   }
 
+  // (B1) Third-party surfaces are browsers, not routes: a live view already on the
+  // app's own origin is wherever the user last navigated (a Notion page). Reopening
+  // reveals it as-is instead of yanking them back to the entry URL. An explicit
+  // deep-link (urlPath) or Refresh (forceReload) still navigates.
+  if (
+    absoluteUrl &&
+    !forceReload &&
+    !urlPath &&
+    existing &&
+    !existing.webContents.isCrashed() &&
+    !appSurfaceLoadFailed.has(surfaceKey) &&
+    isSameOriginUrl(existing.webContents.getURL(), targetUrl)
+  ) {
+    console.log(
+      `[web-holaapp] ${holaAppId} keeping current page — revealing without reload`,
+    );
+    return;
+  }
+
   // (B2) Soft client-side nav: the caller marked this surface query-driven and the warm
   // view is already on the same first-party SPA (same origin), differing in path / query /
   // hash — e.g. the Cloud rail switching ?section=, OR a real route change like
@@ -18551,7 +18613,9 @@ async function navigateWebHolaAppSurface(
       console.log(`[web-holaapp] ${holaAppId} soft-navigated → ${targetUrl}`);
       return;
     }
-    console.log(`[web-holaapp] ${holaAppId} soft-nav declined — hard loading`);
+    console.log(
+      `[web-holaapp] ${holaAppId} soft-nav declined (page not mounted) — hard loading`,
+    );
   }
 
   // Third-party apps (absoluteUrl) are plain embedded browser surfaces: they
@@ -18605,9 +18669,20 @@ async function navigateWebHolaAppSurface(
   ]);
   // Final URL reveals a redirect (e.g. the web app bounced us to a sign-in page because
   // the surface session isn't authenticated) vs the app itself.
-  console.log(
-    `[web-holaapp] ${holaAppId} settled at ${view.webContents.getURL()}`,
-  );
+  const settledUrl = view.webContents.getURL();
+  console.log(`[web-holaapp] ${holaAppId} settled at ${settledUrl}`);
+  // Revealing a view that never got anywhere is the white rectangle: the race
+  // above is deliberately permissive so a page that renders its OWN error still
+  // shows, but a view sitting on about:blank has nothing to show at all.
+  if (!settledUrl || settledUrl === "about:blank") {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send(APP_SURFACE_FAILED_CHANNEL, {
+        appId: holaAppId,
+        kind: "blank",
+        url: targetUrl,
+      });
+    }
+  }
 }
 
 // Prewarm a web HolaApp surface: create its (detached, invisible) BrowserView and
@@ -27540,6 +27615,32 @@ app.whenReady().then(async () => {
   handleTrustedIpc("appSurface:destroy", ["main"], (_event, appId: string) => {
     destroyAppSurfaceView(appId);
   });
+  // Recovery for a surface stuck on a stale/half-authenticated page. Scoped to
+  // the app's own origin: third-party surfaces share the workspace browser
+  // partition with the imported profile and the agent's browser, so clearing the
+  // partition would sign the user out of everything they own.
+  handleTrustedIpc(
+    "appSurface:clearAppData",
+    ["main"],
+    async (_event, surfaceKey: string, appUrl?: string) => {
+      const view = appSurfaceViews.get(surfaceKey);
+      if (!view) {
+        return;
+      }
+      const from = view.webContents.getURL() || appUrl || "";
+      let origin = "";
+      try {
+        origin = from ? new URL(from).origin : "";
+      } catch {
+        origin = "";
+      }
+      if (!origin) {
+        return;
+      }
+      await view.webContents.session.clearStorageData({ origin });
+      view.webContents.reload();
+    },
+  );
   handleTrustedIpc("appSurface:hide", ["main"], () => {
     hideAppSurface();
   });
