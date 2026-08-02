@@ -10448,13 +10448,9 @@ export function ChatPane({
                                     if (!editor) {
                                       return;
                                     }
-                                    // Video is a runtime tool — enter video
-                                    // mode, no skill to quote.
                                     if (type.videoMode) {
                                       setImageComposerMode(false);
                                       setVideoComposerMode(true);
-                                      editor.focus();
-                                      return;
                                     }
                                     if (type.imageMode) {
                                       setVideoComposerMode(false);

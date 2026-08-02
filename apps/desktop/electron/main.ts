@@ -22457,12 +22457,13 @@ function defaultSkillsDirectory(): string {
     : path.join(__dirname, "..", "..", "electron", "default-skills");
 }
 
-// Seed the bundled default skills into a workspace's skills/ folder exactly
-// once (tracked by a marker file), so they appear in the Installed list and the
-// agent can use them — while staying user-deletable: once the marker exists we
-// never re-seed, so a default the user removes stays removed. Also backfills
-// pre-existing workspaces on first open. Never throws — seeding defaults must
-// not block workspace resolution.
+// Seed the bundled default skills into a workspace's skills/ folder, so they
+// appear in the Installed list and the agent can use them — while staying
+// user-deletable. The marker records which skills were ever seeded: one already
+// in that list is never re-seeded (a default the user removes stays removed),
+// while a default added in a later build is seeded on next open, so an existing
+// workspace isn't stuck with the set that shipped when it was created. Never
+// throws — seeding defaults must not block workspace resolution.
 async function ensureDefaultWorkspaceSkills(workspaceRoot: string): Promise<void> {
   try {
     if (!workspaceRoot || !existsSync(workspaceRoot)) {
@@ -22474,9 +22475,25 @@ async function ensureDefaultWorkspaceSkills(workspaceRoot: string): Promise<void
       "state",
       "default-skills-seeded.json",
     );
+    let alreadySeeded: string[] = [];
     if (existsSync(markerPath)) {
-      return;
+      try {
+        const marker = JSON.parse(await fs.readFile(markerPath, "utf8")) as {
+          skills?: unknown;
+        };
+        if (!Array.isArray(marker.skills)) {
+          return;
+        }
+        alreadySeeded = marker.skills.filter(
+          (value): value is string => typeof value === "string",
+        );
+      } catch {
+        // An unreadable marker means we can't tell "never seeded" from "user
+        // deleted it" — leave the workspace alone rather than resurrect skills.
+        return;
+      }
     }
+    const seededBefore = new Set(alreadySeeded);
     const sourceDir = defaultSkillsDirectory();
     if (!existsSync(sourceDir)) {
       return;
@@ -22490,6 +22507,9 @@ async function ensureDefaultWorkspaceSkills(workspaceRoot: string): Promise<void
         continue;
       }
       const skillId = entry.name;
+      if (seededBefore.has(skillId)) {
+        continue;
+      }
       const dest = path.join(skillsRoot, skillId);
       // Don't clobber a skill the user (or a capability) already installed.
       if (existsSync(dest)) {
@@ -22498,10 +22518,17 @@ async function ensureDefaultWorkspaceSkills(workspaceRoot: string): Promise<void
       await fs.cp(path.join(sourceDir, skillId), dest, { recursive: true });
       seeded.push(skillId);
     }
+    if (existsSync(markerPath) && seeded.length === 0) {
+      return;
+    }
     await fs.mkdir(path.dirname(markerPath), { recursive: true });
     await fs.writeFile(
       markerPath,
-      JSON.stringify({ version: 1, skills: seeded }, null, 2),
+      JSON.stringify(
+        { version: 1, skills: [...alreadySeeded, ...seeded] },
+        null,
+        2,
+      ),
       "utf8",
     );
   } catch (error) {

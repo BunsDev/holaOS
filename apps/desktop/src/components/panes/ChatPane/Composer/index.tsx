@@ -729,6 +729,10 @@ export function Composer({
                 onClick={() => {
                   setImageMode(false);
                   setVideoMode(true);
+                  composerEditorRef.current?.insertSkill(
+                    "video-generator",
+                    "Video Generator",
+                  );
                   composerEditorRef.current?.focus();
                 }}
               >
