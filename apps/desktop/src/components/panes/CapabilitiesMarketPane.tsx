@@ -653,7 +653,7 @@ export function CapabilitiesMarketPane({
                       ) : null
                     }
                     decorated
-                    description="Bundle skills and integrations into a combo — install one from the Marketplace, or build your own."
+                    description="Bundle skills and connections into a combo — install one from the Marketplace, or build your own."
                     icon={Sparkles}
                     size="md"
                     title="No combos installed yet"
@@ -684,7 +684,7 @@ export function CapabilitiesMarketPane({
 
                 {filtered.length === 0 ? (
                   <p className="py-8 text-center text-sm text-muted-foreground">
-                    No capabilities match your search.
+                    No combos match your search.
                   </p>
                 ) : (
                   renderGrid(filtered)

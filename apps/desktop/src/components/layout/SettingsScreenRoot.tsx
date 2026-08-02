@@ -127,7 +127,7 @@ function pageTitle(section: UiSettingsPaneSection): string {
     case "agents":
       return "Agents";
     case "integrations":
-      return "Integrations";
+      return "Connections";
     case "channels":
       return "Channels";
     case "memory":

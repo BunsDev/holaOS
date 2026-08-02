@@ -68,11 +68,10 @@ export const videoGenParamsAtom = atom<VideoGenParams>({
 export const VIDEO_MODE_STARTER =
   "Create a video: describe the scene, subject, motion, and mood.";
 
-// A one-line directive appended to the sent message while video mode is active.
-// Unlike image mode (which quotes the image-generator skill to signal intent),
-// video generation is a bare runtime tool, so this suffix carries BOTH the
-// "generate a video" intent and any non-Auto resolution/aspect/duration the user
-// picked — the agent only ever sees the text, not the composer's mode state.
+// A one-line settings suffix appended to the sent message so the video skill +
+// tool pick up the resolution/aspect/duration the user chose (only when
+// non-Auto). Returns "" when they're all Auto — the quoted video-generator skill
+// already carries the intent, so there is nothing left to say.
 export function videoSettingsSuffix(params: VideoGenParams): string {
   const parts: string[] = [];
   if (params.resolution !== "auto") {
@@ -84,6 +83,5 @@ export function videoSettingsSuffix(params: VideoGenParams): string {
   if (params.duration !== "auto") {
     parts.push(`duration ${params.duration}`);
   }
-  const settings = parts.length > 0 ? ` (${parts.join(", ")})` : "";
-  return `\n\n[Generate a video from the description above${settings}.]`;
+  return parts.length > 0 ? `\n\n[Video settings — ${parts.join(", ")}.]` : "";
 }

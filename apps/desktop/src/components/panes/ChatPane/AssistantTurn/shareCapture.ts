@@ -275,6 +275,13 @@ export function isShareableDocOutput(output: ShareableOutput): boolean {
   );
 }
 
+/** Anything a reader could receive: a picture, a clip, or a deliverable to open.
+ *  The per-artifact Share affordance asks this rather than the media-only test,
+ *  which is why a turn that produced only a deck offered no way to share it. */
+export function isShareableOutput(output: ShareableOutput): boolean {
+  return isShareableMediaOutput(output) || isShareableDocOutput(output);
+}
+
 /** Capture document outputs as base64 (keeping the original file name) so the
  *  HolaHub composer can upload them — the download-card path for a session. */
 export async function gatherShareFiles(

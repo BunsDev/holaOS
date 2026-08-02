@@ -48,6 +48,7 @@ const SKILL_ICON: Record<string, string> = {
   "data-analyst": "ph:chart-pie-slice-fill",
   // productivity
   "image-generator": "ph:image-fill",
+  "video-generator": "ph:video-camera-fill",
   "image-editor": "ph:magic-wand-fill",
   "thumbnail-designer": "ph:image-square-fill",
   "video-storyboarder": "ph:film-strip-fill",

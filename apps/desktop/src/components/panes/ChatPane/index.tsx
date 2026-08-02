@@ -101,6 +101,8 @@ import { getExplorerAttachmentClipboardEntry } from "@/lib/appClipboard";
 import { billingRpcFetch } from "@/lib/app-sdk-client";
 import { declineIntegrationProposals, remoteApi } from "@/lib/remoteApiClient";
 import { useAtomValue, useSetAtom } from "jotai";
+import { skillTitlesAtom } from "./Composer/editor/skillTitles";
+import { shareContextAtom } from "./AssistantTurn/shareContext";
 import { recentFilesAtom } from "@/components/layout/shell/state/recentFiles";
 import {
   type ActiveWebAppSurface,
@@ -8649,6 +8651,19 @@ export function ChatPane({
       ),
     [availableWorkspaceSkills],
   );
+  // Publish the titles so a skill chip can resolve its own label later — one
+  // inserted the instant a skill was installed has only the raw id to show.
+  const setSkillTitles = useSetAtom(skillTitlesAtom);
+  useEffect(() => {
+    const titles: Record<string, string> = {};
+    for (const [skillId, skill] of availableWorkspaceSkillMap) {
+      if (skill?.title) {
+        titles[skillId] = skill.title;
+      }
+    }
+    setSkillTitles(titles);
+  }, [availableWorkspaceSkillMap, setSkillTitles]);
+
   const quotedSkills = useMemo<ChatComposerQuotedSkillItem[]>(
     () =>
       quotedSkillIds.map((skillId) => {
@@ -8817,6 +8832,33 @@ export function ChatPane({
       ),
     [messages, showSessionExecutionInternals],
   );
+
+  const setShareContext = useSetAtom(shareContextAtom);
+  useEffect(() => {
+    setShareContext({
+      messages: displayMessages,
+      toolNames: {
+        skills: Object.fromEntries(
+          [...availableWorkspaceSkillMap.entries()].map(([id, skill]) => [
+            id,
+            skill?.title ?? id,
+          ]),
+        ),
+        integrations: Object.fromEntries(
+          Object.entries(composioToolkitsByProvider).map(([slug, toolkit]) => [
+            slug,
+            toolkit?.name ?? slug,
+          ]),
+        ),
+      },
+    });
+  }, [
+    displayMessages,
+    availableWorkspaceSkillMap,
+    composioToolkitsByProvider,
+    setShareContext,
+  ]);
+
   const lastCompletedAssistantMessageId = useMemo(() => {
     if (showLiveAssistantTurn) {
       return null;
@@ -10036,7 +10078,7 @@ export function ChatPane({
                 <span className="font-medium">Waiting for you to connect:</span>{" "}
                 {pendingIntegrationsWait.unresolvedSlugs.length > 0
                   ? pendingIntegrationsWait.unresolvedSlugs.join(", ")
-                  : "the integrations the agent proposed above"}
+                  : "the connections the agent proposed above"}
                 . The next message resumes automatically once all are connected.
               </div>
               {pendingIntegrationsWait.unresolvedSlugs.length > 0 ? (
@@ -10406,13 +10448,9 @@ export function ChatPane({
                                     if (!editor) {
                                       return;
                                     }
-                                    // Video is a runtime tool — enter video
-                                    // mode, no skill to quote.
                                     if (type.videoMode) {
                                       setImageComposerMode(false);
                                       setVideoComposerMode(true);
-                                      editor.focus();
-                                      return;
                                     }
                                     if (type.imageMode) {
                                       setVideoComposerMode(false);

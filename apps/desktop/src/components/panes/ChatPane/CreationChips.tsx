@@ -12,8 +12,7 @@ export interface CreationType {
   label: string;
   /** Flip the composer into image mode (model / quality / aspect controls). */
   imageMode?: boolean;
-  /** Flip the composer into video mode (model / resolution / aspect / duration).
-   *  Video generation is a runtime tool, so no skill is quoted. */
+  /** Flip the composer into video mode (model / resolution / aspect / duration). */
   videoMode?: boolean;
   /** Seeded into the composer when skillId isn't installed in this workspace,
    *  so the chip still hands the user a usable starting point instead of
@@ -33,7 +32,13 @@ const CREATION_TYPES: CreationType[] = [
     label: "Slides",
     examplePrompt: "Create a slide deck outlining a go-to-market plan.",
   },
-  { skillId: "short-video-scripter", label: "Video", videoMode: true },
+  {
+    skillId: "video-generator",
+    label: "Video",
+    videoMode: true,
+    examplePrompt:
+      "Create a short clip: a slow dolly-in on a product on a lit table.",
+  },
   {
     skillId: "doc-coauthoring",
     label: "Doc",

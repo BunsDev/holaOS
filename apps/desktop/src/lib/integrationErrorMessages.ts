@@ -29,7 +29,7 @@ interface ResolveOptions {
   code?: string;
 }
 
-const PROVIDER_FALLBACK = "this integration";
+const PROVIDER_FALLBACK = "this connection";
 
 export function resolveIntegrationError(opts: ResolveOptions): IntegrationErrorCopy {
   const provider = opts.provider?.trim() || PROVIDER_FALLBACK;
@@ -64,7 +64,7 @@ export function resolveIntegrationError(opts: ResolveOptions): IntegrationErrorC
       return {
         headline: `Couldn't reach ${provider}`,
         detail:
-          "Our integrations service had a hiccup. Wait a moment and try again — if it keeps failing, let us know.",
+          "Our connections service had a hiccup. Wait a moment and try again — if it keeps failing, let us know.",
         action: "retry",
       };
     case "popup_blocked":
@@ -100,7 +100,7 @@ export function resolveIntegrationError(opts: ResolveOptions): IntegrationErrorC
     case "not_configured":
       return {
         headline: `${provider} isn't set up yet`,
-        detail: "Open the Integrations tab to connect it first.",
+        detail: "Open the Connections tab to connect it first.",
         action: "reconnect",
       };
     case "not_found":
