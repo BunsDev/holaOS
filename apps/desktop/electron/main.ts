@@ -1109,6 +1109,9 @@ const reportedOperatorSurfaceContexts = new Map<
   ReportedOperatorSurfaceContextPayload
 >();
 const appSurfaceViews = new Map<string, BrowserView>();
+// Surface keys whose last main-frame load failed — a reveal-in-place would pin
+// the error page, so those reopen with a real load instead.
+const appSurfaceLoadFailed = new Set<string>();
 // Identity of each app-surface BrowserView keyed by its webContents.id, so a
 // host-bridge IPC call can be resolved to its owning app WITHOUT trusting ids
 // sent by the (untrusted) hosted page. Set on navigate, cleared on destroy.
@@ -18124,9 +18127,13 @@ function getOrCreateAppSurfaceView(
         console.warn(
           `[app-surface] did-fail-load ${errorCode} ${errorDescription} @ ${validatedURL}`,
         );
+        appSurfaceLoadFailed.add(appId);
       }
     },
   );
+  view.webContents.on("did-finish-load", () => {
+    appSurfaceLoadFailed.delete(appId);
+  });
   // Push the live location (current page URL + title) to the renderer so the
   // chat copilot knows which page the user is actually viewing — for ANY web
   // HolaApp surface (need-review, gofunds, third-party bundles like Notion).
@@ -18315,6 +18322,7 @@ function destroyAppSurfaceView(appId: string): void {
     // best effort
   }
   appSurfaceViews.delete(appId);
+  appSurfaceLoadFailed.delete(appId);
   if (activeAppSurfaceId === appId) {
     activeAppSurfaceId = null;
   }
@@ -18527,6 +18535,25 @@ async function navigateWebHolaAppSurface(
   ) {
     console.log(
       `[web-holaapp] ${holaAppId} already loaded — revealing without reload`,
+    );
+    return;
+  }
+
+  // (B1) Third-party surfaces are browsers, not routes: a live view already on the
+  // app's own origin is wherever the user last navigated (a Notion page). Reopening
+  // reveals it as-is instead of yanking them back to the entry URL. An explicit
+  // deep-link (urlPath) or Refresh (forceReload) still navigates.
+  if (
+    absoluteUrl &&
+    !forceReload &&
+    !urlPath &&
+    existing &&
+    !existing.webContents.isCrashed() &&
+    !appSurfaceLoadFailed.has(surfaceKey) &&
+    isSameOriginUrl(existing.webContents.getURL(), targetUrl)
+  ) {
+    console.log(
+      `[web-holaapp] ${holaAppId} keeping current page — revealing without reload`,
     );
     return;
   }
