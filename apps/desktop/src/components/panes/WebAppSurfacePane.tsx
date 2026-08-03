@@ -128,6 +128,47 @@ export function WebAppSurfacePane({
     return () => off?.();
   }, [holaAppId]);
 
+  // The backstop. Everything above depends on something reporting a failure; a
+  // surface can also just… not show anything, for a reason nobody anticipated.
+  // Once the spinner is gone the pane is claiming the app is up, so check that
+  // claim — twice, because a slow SPA is not a broken one — and if the page is
+  // still empty, say so instead of showing a white rectangle.
+  useEffect(() => {
+    if (loading || failure || error) {
+      return;
+    }
+    let cancelled = false;
+    const probe = window.electronAPI?.appSurface?.probe;
+    if (!probe) {
+      return;
+    }
+    const check = async (): Promise<boolean> => {
+      const result = await probe(holaAppId).catch(() => null);
+      return result?.empty === true || result?.missing === true;
+    };
+    const timers = [
+      window.setTimeout(async () => {
+        if (cancelled || !(await check())) {
+          return;
+        }
+        timers.push(
+          window.setTimeout(async () => {
+            if (cancelled || !(await check())) {
+              return;
+            }
+            setFailure({ kind: "blank" });
+          }, 2500)
+        );
+      }, 1500),
+    ];
+    return () => {
+      cancelled = true;
+      for (const id of timers) {
+        window.clearTimeout(id);
+      }
+    };
+  }, [holaAppId, loading, failure, error]);
+
   const handleRefresh = () => {
     setError("");
     setFailure(null);

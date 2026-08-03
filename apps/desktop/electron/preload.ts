@@ -1873,6 +1873,14 @@ contextBridge.exposeInMainWorld("electronAPI", {
 			ipcRenderer.on("appSurface:failed", wrapped);
 			return () => ipcRenderer.removeListener("appSurface:failed", wrapped);
 		},
+		/** Ask whether the surface is actually showing anything. The backstop for a
+		 *  blank nobody reported. */
+		probe: (surfaceKey: string) =>
+			ipcRenderer.invoke("appSurface:probe", surfaceKey) as Promise<{
+				missing: boolean;
+				empty: boolean;
+				url: string;
+			}>,
 		/** Clear this app's own origin (cookies + storage) and reload — recovery
 		 *  for a surface stuck on a stale or half-signed-in page. */
 		clearAppData: (surfaceKey: string, appUrl?: string) =>
