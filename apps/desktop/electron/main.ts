@@ -18377,6 +18377,16 @@ function webHolaAppSurfaceKey(holaAppId: string): string {
   return `web:${holaAppId}`;
 }
 
+/** A view by either name. The renderer knows a HolaApp by its id; a web surface
+ *  is stored under a namespaced key, and looking one up by the other silently
+ *  returns nothing — which reads as "this surface is gone". */
+function resolveAppSurfaceView(appIdOrKey: string) {
+  return (
+    appSurfaceViews.get(appIdOrKey) ??
+    appSurfaceViews.get(webHolaAppSurfaceKey(appIdOrKey))
+  );
+}
+
 function resolveWebHolaAppUrl(
   holaAppId: string,
   urlPath?: string,
@@ -27645,8 +27655,8 @@ app.whenReady().then(async () => {
   handleTrustedIpc(
     "appSurface:probe",
     ["main"],
-    async (_event, surfaceKey: string) => {
-      const view = appSurfaceViews.get(surfaceKey);
+    async (_event, appIdOrKey: string) => {
+      const view = resolveAppSurfaceView(appIdOrKey);
       if (!view || view.webContents.isCrashed()) {
         return { missing: true, empty: true, url: "" };
       }
@@ -27684,8 +27694,8 @@ app.whenReady().then(async () => {
   handleTrustedIpc(
     "appSurface:clearAppData",
     ["main"],
-    async (_event, surfaceKey: string, appUrl?: string) => {
-      const view = appSurfaceViews.get(surfaceKey);
+    async (_event, appIdOrKey: string, appUrl?: string) => {
+      const view = resolveAppSurfaceView(appIdOrKey);
       if (!view) {
         return;
       }

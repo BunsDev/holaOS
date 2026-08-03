@@ -142,9 +142,16 @@ export function WebAppSurfacePane({
     if (!probe) {
       return;
     }
+    // Only an inspected, genuinely empty page counts. A view we could not find
+    // is one we could not inspect — racing a close or an open — and guessing
+    // there is exactly how this panel starts crying wolf.
+    let probedUrl = "";
     const check = async (): Promise<boolean> => {
       const result = await probe(holaAppId).catch(() => null);
-      return result?.empty === true || result?.missing === true;
+      if (result?.url) {
+        probedUrl = result.url;
+      }
+      return result?.empty === true && result.missing !== true;
     };
     const timers = [
       window.setTimeout(async () => {
@@ -156,7 +163,7 @@ export function WebAppSurfacePane({
             if (cancelled || !(await check())) {
               return;
             }
-            setFailure({ kind: "blank" });
+            setFailure({ kind: "blank", url: probedUrl });
           }, 2500)
         );
       }, 1500),
