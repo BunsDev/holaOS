@@ -266,7 +266,7 @@ function NewTabLanding() {
           <div className="space-y-1.5">
             <BuildCard
               icon={<Plug className="size-4" strokeWidth={1.75} />}
-              label="Connect an integration"
+              label="Add a connection"
               description="Give the agent access to your tools."
               tone="violet"
               onClick={handleConnectIntegration}

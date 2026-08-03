@@ -121,6 +121,17 @@ export interface ChatStartInput {
    *  model the viewer does not have falls back to their default rather than
    *  failing the hand-off — a Reproduce should never be blocked by it. */
   model?: string;
+  /** Generate images with this model in the handed-over session. There is no
+   *  per-turn image model — the agent's image tool takes only prompt, filename
+   *  and size — so this sets the workspace's image-generation setting, and the
+   *  session opens in image mode where the model pill shows it. A remix that
+   *  quietly used a different model would not be a remix. */
+  imageModel?: string;
+  /** The same, for video. Sent instead of `imageModel`, never alongside it: the
+   *  two composer modes are exclusive, and a video's model in the image slot
+   *  both opens the wrong mode and overwrites a setting it has no business
+   *  touching. */
+  videoModel?: string;
   /** Files to stage on the composer as pending attachments — a Reproduce sends
    *  the shared Output here so the viewer works "from something like this".
    *  They land as ordinary attachments, so removing one is just removing it. */
@@ -351,6 +362,10 @@ export interface ShareDraft {
   /** Generated video(s) captured from the turn — same base64+upload path as
    *  images (size-capped upstream to keep IPC sane). */
   videos: ShareDraftImage[];
+  /** Deliverable documents (pptx/docx/xlsx/pdf/…) attached to the post itself.
+   *  They used to need a fabricated one-turn session to travel at all, which
+   *  made a shared deck render and act as a conversation. */
+  files?: ShareDraftFile[];
   /** Session tools resolved to catalog refs, each carrying its origin. */
   items: ShareDraftItem[];
   /** Which share mode produced this draft; absent = a tool-only share. */

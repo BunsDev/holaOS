@@ -231,31 +231,12 @@ export function SharePreviewPane() {
       .filter(Boolean)
       .join("\n\n")
       .slice(0, 6000);
-    if (files.length > 0) {
-      // Docs have no standalone-post transport, so wrap the picked artifacts in a
-      // one-turn session (its file/media cards ARE the post — no transcript).
-      const turn: ShareDraftSessionTurn = {
-        role: "assistant",
-        text: "",
-        ...(images.length > 0 ? { images } : {}),
-        ...(videos.length > 0 ? { videos } : {}),
-        ...(files.length > 0 ? { files } : {}),
-      };
-      await shareToHolahub({
-        body: caption,
-        sourceText,
-        items,
-        form: "output",
-        recipe,
-        session: { turns: [turn] },
-      });
-      return;
-    }
     await shareToHolahub({
       body: caption,
       sourceText,
       images,
       videos,
+      files,
       items,
       form: "output",
       recipe,

@@ -15,9 +15,24 @@ import {
   centerFullscreenAtom,
   sidebarCollapsedAtom,
 } from "@/components/layout/shell/state/ui";
+import { Button } from "@/components/ui/button";
 import { Loader2, RefreshCw, X } from "@/components/ui/icons";
 import { cn } from "@/lib/utils";
 import { useStoplightCompensation } from "@/lib/StoplightContext";
+
+// What each failure means to someone who just sees an empty pane. No error code
+// in the headline — the code is at the bottom for a bug report.
+const FAILURE_HEADLINE: Record<"load" | "crash" | "blank", string> = {
+  load: "This app didn't load",
+  crash: "This app stopped responding",
+  blank: "This app opened blank",
+};
+
+const FAILURE_DETAIL: Record<"load" | "crash" | "blank", string> = {
+  load: "The page couldn't be reached. Your connection or the app itself may be down.",
+  crash: "Its window ran out of memory or crashed. Reloading starts it fresh.",
+  blank: "It finished opening without rendering anything — usually a session that expired half-way.",
+};
 
 interface WebAppSurfacePaneProps {
   holaAppId: string;
@@ -65,6 +80,12 @@ export function WebAppSurfacePane({
   const sidebarCollapsed = useAtomValue(sidebarCollapsedAtom);
   const centerFullscreen = useAtomValue(centerFullscreenAtom);
   const [error, setError] = useState("");
+  const [failure, setFailure] = useState<{
+    kind: "load" | "crash" | "blank";
+    code?: number;
+    detail?: string;
+    url?: string;
+  } | null>(null);
   // True while the native surface is loading the page. The native BrowserView
   // paints on top of this DOM, so we collapse it to 0×0 while loading (see the
   // bounds effect) to reveal the loading screen, then expand it once the page
@@ -93,8 +114,71 @@ export function WebAppSurfacePane({
     }
   })();
 
+  // A surface failure is invisible from here — the native view paints over its
+  // own reserved space, so a dead load and a blank page look the same as a page
+  // that simply hasn't finished. Main tells us which it was.
+  useEffect(() => {
+    const off = window.electronAPI?.appSurface?.onFailed?.((payload) => {
+      if (payload.appId !== holaAppId) {
+        return;
+      }
+      setLoading(false);
+      setFailure(payload);
+    });
+    return () => off?.();
+  }, [holaAppId]);
+
+  // The backstop. Everything above depends on something reporting a failure; a
+  // surface can also just… not show anything, for a reason nobody anticipated.
+  // Once the spinner is gone the pane is claiming the app is up, so check that
+  // claim — twice, because a slow SPA is not a broken one — and if the page is
+  // still empty, say so instead of showing a white rectangle.
+  useEffect(() => {
+    if (loading || failure || error) {
+      return;
+    }
+    let cancelled = false;
+    const probe = window.electronAPI?.appSurface?.probe;
+    if (!probe) {
+      return;
+    }
+    // Only an inspected, genuinely empty page counts. A view we could not find
+    // is one we could not inspect — racing a close or an open — and guessing
+    // there is exactly how this panel starts crying wolf.
+    let probedUrl = "";
+    const check = async (): Promise<boolean> => {
+      const result = await probe(holaAppId).catch(() => null);
+      if (result?.url) {
+        probedUrl = result.url;
+      }
+      return result?.empty === true && result.missing !== true;
+    };
+    const timers = [
+      window.setTimeout(async () => {
+        if (cancelled || !(await check())) {
+          return;
+        }
+        timers.push(
+          window.setTimeout(async () => {
+            if (cancelled || !(await check())) {
+              return;
+            }
+            setFailure({ kind: "blank", url: probedUrl });
+          }, 2500)
+        );
+      }, 1500),
+    ];
+    return () => {
+      cancelled = true;
+      for (const id of timers) {
+        window.clearTimeout(id);
+      }
+    };
+  }, [holaAppId, loading, failure, error]);
+
   const handleRefresh = () => {
     setError("");
+    setFailure(null);
     setLoading(true);
     window.electronAPI.appSurface
       // forceReload: Refresh must re-load even if the view is already on this URL
@@ -109,6 +193,23 @@ export function WebAppSurfacePane({
       });
   };
 
+  // The last URL the surface actually reached — what "Open in browser" should
+  // open, and the origin whose data a sign-out clears.
+  const liveUrl =
+    (activeSurface?.holaAppId === holaAppId ? activeSurface.currentUrl : null) ||
+    failure?.url ||
+    url ||
+    "";
+
+  const handleClearData = () => {
+    setFailure(null);
+    setLoading(true);
+    window.electronAPI.appSurface
+      .clearAppData(holaAppId, liveUrl)
+      .then(() => handleRefresh())
+      .catch(() => handleRefresh());
+  };
+
   // Load the page into the native surface whenever the target changes. A real
   // identity change (holaAppId / url) is a cold load, so show the spinner. A
   // query-only change on a query-driven surface (the Cloud rail switching
@@ -120,6 +221,7 @@ export function WebAppSurfacePane({
     const identityChanged = prevIdentityRef.current !== identity;
     prevIdentityRef.current = identity;
     setError("");
+    setFailure(null);
     if (identityChanged || !queryDriven) {
       setLoading(true);
     }
@@ -151,7 +253,7 @@ export function WebAppSurfacePane({
     if (!viewport) {
       return;
     }
-    if (suspendNativeView || error || loading) {
+    if (suspendNativeView || error || failure || loading) {
       window.electronAPI.appSurface.setBounds({
         x: 0,
         y: 0,
@@ -191,7 +293,14 @@ export function WebAppSurfacePane({
     };
     // Re-sync when the sidebar collapse state changes: collapsing/expanding it
     // shifts the surface's left edge + width, so the native bounds must follow.
-  }, [suspendNativeView, error, loading, sidebarCollapsed, centerFullscreen]);
+  }, [
+    suspendNativeView,
+    error,
+    failure,
+    loading,
+    sidebarCollapsed,
+    centerFullscreen,
+  ]);
 
   // Track the surface's live location (current page URL + title) into the active
   // surface atom, so the chat copilot's context reflects the page the user is
@@ -269,6 +378,14 @@ export function WebAppSurfacePane({
           <span className="truncate font-medium text-neutral-700 text-sm dark:text-neutral-200">
             {title}
           </span>
+          {import.meta.env.DEV && liveUrl ? (
+            <span
+              className="window-no-drag min-w-0 select-text truncate font-mono text-[11px] text-neutral-400 dark:text-neutral-500"
+              title={liveUrl}
+            >
+              {liveUrl}
+            </span>
+          ) : null}
           <button
             aria-label="Refresh HolaApp"
             className="window-no-drag ml-auto grid size-6 place-items-center rounded text-neutral-500 transition-colors hover:bg-neutral-100 hover:text-neutral-800 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
@@ -292,7 +409,51 @@ export function WebAppSurfacePane({
         </div>
       )}
       <div className="relative min-h-0 flex-1" ref={viewportRef}>
-        {error ? (
+        {failure ? (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-5 bg-background px-6 text-center">
+            <div className="flex flex-col items-center gap-1.5">
+              <span className="font-medium text-foreground text-sm">
+                {FAILURE_HEADLINE[failure.kind]}
+              </span>
+              <span className="max-w-sm text-muted-foreground text-xs leading-relaxed">
+                {FAILURE_DETAIL[failure.kind]}
+              </span>
+            </div>
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              <Button onClick={handleRefresh} size="sm" type="button">
+                <RefreshCw className="size-3.5" />
+                Reload
+              </Button>
+              <Button
+                onClick={handleClearData}
+                size="sm"
+                type="button"
+                variant="outline"
+              >
+                Sign out of {title} and reload
+              </Button>
+              {liveUrl ? (
+                <Button
+                  onClick={() =>
+                    window.electronAPI?.ui?.openExternalUrl?.(liveUrl)
+                  }
+                  size="sm"
+                  type="button"
+                  variant="ghost"
+                >
+                  Open in browser
+                </Button>
+              ) : null}
+            </div>
+            {/* The code is what makes a bug report actionable — "it was blank"
+                is not. Quiet enough to ignore when it isn't wanted. */}
+            <span className="text-[11px] text-muted-foreground/70">
+              {[failure.kind, failure.code, failure.detail]
+                .filter(Boolean)
+                .join(" · ")}
+            </span>
+          </div>
+        ) : error ? (
           <div className="flex h-full items-center justify-center p-6 text-center">
             <div className="max-w-sm text-neutral-500 text-sm">{error}</div>
           </div>

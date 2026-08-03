@@ -1,5 +1,6 @@
 import type {
   ShareDraft,
+  ShareDraftFile,
   ShareDraftForm,
   ShareDraftImage,
   ShareDraftItem,
@@ -48,6 +49,9 @@ export function useShareToHolahub() {
       imageIds?: string[];
       images?: ShareDraftImage[];
       videos?: ShareDraftImage[];
+      /** Documents (pptx/docx/xlsx/pdf/…) attached to the post itself. They used
+       *  to need a fabricated one-turn session to travel at all. */
+      files?: ShareDraftFile[];
       items?: ShareDraftItem[];
       /** Which share mode produced this — carried instead of re-inferred. */
       form?: ShareDraftForm;
@@ -59,9 +63,16 @@ export function useShareToHolahub() {
       const body = input.body?.trim() ?? "";
       const images = input.images ?? [];
       const videos = input.videos ?? [];
+      const files = input.files ?? [];
       const sessionTurns = input.session?.turns ?? [];
       if (
-        !(body || images.length > 0 || videos.length > 0 || sessionTurns.length > 0)
+        !(
+          body ||
+          images.length > 0 ||
+          videos.length > 0 ||
+          files.length > 0 ||
+          sessionTurns.length > 0
+        )
       ) {
         return;
       }
@@ -72,6 +83,7 @@ export function useShareToHolahub() {
         imageIds: input.imageIds ?? [],
         images,
         videos,
+        files,
         items: input.items ?? [],
         ...(input.form ? { form: input.form } : {}),
         // Any one field is worth carrying: a conversation share knows the model

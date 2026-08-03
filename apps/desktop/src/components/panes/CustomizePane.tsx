@@ -359,7 +359,7 @@ export function CustomizePane({ workspaceId }: { workspaceId: string | null }) {
 														Browse marketplace
 													</Button>
 												}
-												description="Combos bundle related skills and integrations. Add some from the marketplace."
+												description="Combos bundle related skills and connections. Add some from the marketplace."
 												icon={Boxes}
 												size="md"
 												title="No combos installed"

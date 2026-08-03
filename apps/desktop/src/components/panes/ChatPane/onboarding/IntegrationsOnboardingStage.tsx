@@ -82,7 +82,7 @@ export function IntegrationsOnboardingStage({
         await listAllIntegrationConnections();
       setConnections(result.connections);
     } catch {
-      toast.error("Couldn't load your integrations", {
+      toast.error("Couldn't load your connections", {
         description: "Check your connection and try again.",
       });
     }

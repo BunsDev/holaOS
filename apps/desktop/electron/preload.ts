@@ -1848,6 +1848,47 @@ contextBridge.exposeInMainWorld("electronAPI", {
 			ipcRenderer.on("appSurface:location", wrapped);
 			return () => ipcRenderer.removeListener("appSurface:location", wrapped);
 		},
+		/** The surface failed to show anything — a load error, a dead renderer, or
+		 *  a view revealed on about:blank. The pane has no other way to know: the
+		 *  native view paints over its own reserved space. */
+		onFailed: (
+			listener: (payload: {
+				appId: string;
+				kind: "load" | "crash" | "blank";
+				code?: number;
+				detail?: string;
+				url?: string;
+			}) => void,
+		) => {
+			const wrapped = (
+				_event: unknown,
+				payload: {
+					appId: string;
+					kind: "load" | "crash" | "blank";
+					code?: number;
+					detail?: string;
+					url?: string;
+				},
+			) => listener(payload);
+			ipcRenderer.on("appSurface:failed", wrapped);
+			return () => ipcRenderer.removeListener("appSurface:failed", wrapped);
+		},
+		/** Ask whether the surface is actually showing anything. The backstop for a
+		 *  blank nobody reported. */
+		probe: (surfaceKey: string) =>
+			ipcRenderer.invoke("appSurface:probe", surfaceKey) as Promise<{
+				missing: boolean;
+				empty: boolean;
+				url: string;
+			}>,
+		/** Clear this app's own origin (cookies + storage) and reload — recovery
+		 *  for a surface stuck on a stale or half-signed-in page. */
+		clearAppData: (surfaceKey: string, appUrl?: string) =>
+			ipcRenderer.invoke(
+				"appSurface:clearAppData",
+				surfaceKey,
+				appUrl,
+			) as Promise<void>,
 	},
 	holaApps: {
 		install: (holaAppId: string) =>

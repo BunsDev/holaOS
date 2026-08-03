@@ -169,7 +169,7 @@ export function CapabilityCreatePane({
         </Button>
         <Button disabled={!canCreate} onClick={submit} size="sm">
           <Sparkles className="size-3.5" />
-          Create capability
+          Create combo
         </Button>
       </footer>
     </div>

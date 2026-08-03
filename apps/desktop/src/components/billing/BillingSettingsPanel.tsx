@@ -58,7 +58,7 @@ function formatBillingDateTime(value: string) {
 
 const CATEGORY_LABELS: Record<string, string> = {
   llm: "Model",
-  integration: "Integration",
+  integration: "Connection",
   proactive: "Background work",
   workspace: "Workspace",
 };

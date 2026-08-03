@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { Loader2, X } from "@/components/ui/icons";
 
 import { Button } from "@/components/ui/button";
+import { PreviewVideo } from "@/components/ui/preview-video";
 import { cn } from "@/lib/utils";
 
 interface FileQuickPreviewProps {
@@ -134,12 +135,8 @@ function PreviewBody({ payload }: { payload: FilePreviewPayload }) {
     case "video":
       return payload.dataUrl ? (
         <div className="flex h-full items-center justify-center bg-fg-2 p-6">
-          {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-          <video
+          <PreviewVideo
             src={payload.dataUrl}
-            controls
-            autoPlay
-            loop
             className="max-h-[70vh] max-w-full rounded-lg shadow-sm"
           />
         </div>
