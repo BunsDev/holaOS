@@ -18586,6 +18586,7 @@ async function navigateWebHolaAppSurface(
     existing &&
     !existing.webContents.isLoading() &&
     !existing.webContents.isCrashed() &&
+    !appSurfaceLoadFailed.has(surfaceKey) &&
     existing.webContents.getURL() === targetUrl
   ) {
     console.log(
@@ -18626,6 +18627,7 @@ async function navigateWebHolaAppSurface(
     existing &&
     !existing.webContents.isLoading() &&
     !existing.webContents.isCrashed() &&
+    !appSurfaceLoadFailed.has(surfaceKey) &&
     isSameOriginUrl(existing.webContents.getURL(), targetUrl)
   ) {
     const ok = await softNavigateAppSurface(existing.webContents, targetUrl);
