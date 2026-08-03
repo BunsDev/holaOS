@@ -570,7 +570,26 @@ async function extractPdfAttachmentText(buffer: Buffer, fileName: string): Promi
     lines.push("</pdf>");
     return normalizeExtractedText(lines.join("\n"));
   } finally {
-    await pdf.destroy();
+    // pdfjs teardown moved across unpdf/pdfjs versions: PDFDocumentProxy.destroy()
+    // (unpdf <=1.6) -> loadingTask.destroy()/cleanup() (unpdf >=1.8, whose newer
+    // pdfjs proxy no longer exposes destroy). Be version-tolerant, and never let a
+    // cleanup failure mask an otherwise-successful extraction.
+    const doc = pdf as {
+      destroy?: () => Promise<void>;
+      cleanup?: () => Promise<void>;
+      loadingTask?: { destroy?: () => Promise<void> };
+    };
+    try {
+      if (typeof doc.destroy === "function") {
+        await doc.destroy();
+      } else if (typeof doc.loadingTask?.destroy === "function") {
+        await doc.loadingTask.destroy();
+      } else {
+        await doc.cleanup?.();
+      }
+    } catch {
+      // best-effort cleanup — the extracted text is already returned above
+    }
   }
 }
 

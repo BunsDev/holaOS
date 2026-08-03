@@ -34,7 +34,7 @@
     "mcporter": "^0.7.3",
     "openai": "^6.26.0",
     "tree-sitter-wasms": "^0.1.12",
-    "unpdf": "^1.6.1",
+    "unpdf": "1.6.2",
     "web-tree-sitter": "^0.25.10"
   }
 }

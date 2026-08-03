@@ -424,7 +424,7 @@
         "node-pty": "^1.2.0-beta.12",
         "qq-official-bot": "^1.2.3",
         "tar": "^7.5.13",
-        "unpdf": "^1.6.1",
+        "unpdf": "1.6.2",
         "yauzl": "^3.2.1",
         "zod": "^4.3.6",
       },
@@ -474,7 +474,7 @@
         "mcporter": "^0.7.3",
         "openai": "^6.26.0",
         "tree-sitter-wasms": "^0.1.12",
-        "unpdf": "^1.6.1",
+        "unpdf": "1.6.2",
         "web-tree-sitter": "^0.25.10",
       },
       "devDependencies": {
@@ -490,7 +490,7 @@
         "@napi-rs/canvas": "^0.1.100",
         "exceljs": "^4.4.0",
         "jszip": "^3.10.1",
-        "unpdf": "^1.6.1",
+        "unpdf": "1.6.2",
       },
       "devDependencies": {
         "tsx": "^4.20.6",
