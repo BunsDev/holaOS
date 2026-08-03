@@ -46,6 +46,7 @@ import { docxBytesToStyledHtml } from "@/lib/docxToStyledHtml";
 import { useIsDarkTheme } from "@/lib/themeAttr";
 import { resolveLocalHrefToAbsolutePath } from "@/lib/workspacePaths";
 import { useWorkspaceSelection } from "@/lib/workspaceSelection";
+import { PreviewVideo } from "@/components/ui/preview-video";
 import { MentionInChatButton } from "./MentionInChatButton";
 import { PinStarButton } from "./PinStarButton";
 import { fileNameFromPath } from "./state/internalTabs";
@@ -282,12 +283,8 @@ export function FilePreviewPane({ filePath, onClose }: FilePreviewPaneProps) {
   if (preview.kind === "video" && preview.dataUrl) {
     return (
       <div className="flex h-full items-center justify-center overflow-auto bg-muted p-6">
-        {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-        <video
+        <PreviewVideo
           src={preview.dataUrl}
-          controls
-          autoPlay
-          loop
           className="max-h-full max-w-full rounded-lg object-contain shadow-sm"
         />
       </div>
