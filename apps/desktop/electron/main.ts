@@ -18522,6 +18522,24 @@ async function navigateWebHolaAppSurface(
   activeAppSurfaceId = surfaceKey;
   updateAttachedAppSurfaceView();
 
+  // (A0) Refresh reloads the page the surface is ON, never a rebuilt URL. The
+  // pane sends the live pathname as the suffix, and the first-party resolver
+  // appends it to a base that already carries `/apps/<id>` — reloading through
+  // that path double-prefixes and lands on the web app's 404.
+  if (
+    forceReload &&
+    existing &&
+    !existing.webContents.isCrashed() &&
+    existing.webContents.getURL() &&
+    existing.webContents.getURL() !== "about:blank"
+  ) {
+    console.log(
+      `[web-holaapp] ${holaAppId} refresh — reloading ${existing.webContents.getURL()}`,
+    );
+    existing.webContents.reload();
+    return;
+  }
+
   // (B) Warm reopen: a kept-alive view already sitting on the exact target URL
   // (idle, not crashed) needs no reload — return immediately so the renderer
   // reveals the already-painted page instantly. A user-initiated Refresh passes
