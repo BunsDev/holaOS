@@ -27637,6 +27637,46 @@ app.whenReady().then(async () => {
   handleTrustedIpc("appSurface:destroy", ["main"], (_event, appId: string) => {
     destroyAppSurfaceView(appId);
   });
+  // Is this surface actually showing anything? The pane cannot tell — the native
+  // view paints over its own reserved space, and the failure paths we know about
+  // only cover the causes we thought of. This is the backstop: ask the page
+  // itself, so an unexplained blank still ends up as an error the user can act
+  // on rather than a white rectangle.
+  handleTrustedIpc(
+    "appSurface:probe",
+    ["main"],
+    async (_event, surfaceKey: string) => {
+      const view = appSurfaceViews.get(surfaceKey);
+      if (!view || view.webContents.isCrashed()) {
+        return { missing: true, empty: true, url: "" };
+      }
+      const url = view.webContents.getURL();
+      if (!url || url === "about:blank") {
+        return { missing: false, empty: true, url };
+      }
+      if (view.webContents.isLoading()) {
+        return { missing: false, empty: false, url };
+      }
+      try {
+        const empty = (await view.webContents.executeJavaScript(
+          `(() => {
+            try {
+              var b = document.body;
+              if (!b || b.childElementCount === 0) { return true; }
+              var text = (b.innerText || "").trim().length > 0;
+              var visual = !!b.querySelector("img,canvas,svg,video,input,button");
+              return !(text || visual);
+            } catch (e) { return false; }
+          })()`,
+          true,
+        )) as boolean;
+        return { missing: false, empty: empty === true, url };
+      } catch {
+        // Never accuse a page we failed to inspect.
+        return { missing: false, empty: false, url };
+      }
+    },
+  );
   // Recovery for a surface stuck on a stale/half-authenticated page. Scoped to
   // the app's own origin: third-party surfaces share the workspace browser
   // partition with the imported profile and the agent's browser, so clearing the

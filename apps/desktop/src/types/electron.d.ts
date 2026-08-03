@@ -2512,6 +2512,12 @@ declare global {
 					url?: string;
 				}) => void,
 			): () => void;
+			/** Ask whether the surface is actually showing anything. */
+			probe(surfaceKey: string): Promise<{
+				missing: boolean;
+				empty: boolean;
+				url: string;
+			}>;
 			/** Clear this app's origin (cookies + storage) and reload it. */
 			clearAppData(surfaceKey: string, appUrl?: string): Promise<void>;
 		};
