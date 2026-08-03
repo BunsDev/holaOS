@@ -330,6 +330,14 @@ export function WebAppSurfacePane({
           <span className="truncate font-medium text-neutral-700 text-sm dark:text-neutral-200">
             {title}
           </span>
+          {import.meta.env.DEV && liveUrl ? (
+            <span
+              className="window-no-drag min-w-0 select-text truncate font-mono text-[11px] text-neutral-400 dark:text-neutral-500"
+              title={liveUrl}
+            >
+              {liveUrl}
+            </span>
+          ) : null}
           <button
             aria-label="Refresh HolaApp"
             className="window-no-drag ml-auto grid size-6 place-items-center rounded text-neutral-500 transition-colors hover:bg-neutral-100 hover:text-neutral-800 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
