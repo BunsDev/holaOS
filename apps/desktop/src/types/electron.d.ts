@@ -2501,6 +2501,19 @@ declare global {
 					title: string;
 				}) => void,
 			): () => void;
+			/** Subscribe to surface failures — a load error, a dead renderer, or a
+			 * view revealed on about:blank. Returns an unsubscribe fn. */
+			onFailed(
+				listener: (payload: {
+					appId: string;
+					kind: "load" | "crash" | "blank";
+					code?: number;
+					detail?: string;
+					url?: string;
+				}) => void,
+			): () => void;
+			/** Clear this app's origin (cookies + storage) and reload it. */
+			clearAppData(surfaceKey: string, appUrl?: string): Promise<void>;
 		};
 		holaApps: {
 			install(holaAppId: string): Promise<void>;
