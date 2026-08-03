@@ -683,6 +683,14 @@ export const browserViewSuspendedAtom = atom(
     get(newIssueOpenAtom) ||
     get(settingsOpenAtom) ||
     get(shortcutsHelpOpenAtom) ||
-    get(activeInternalTabIdAtom) !== null ||
+    // An internal tab (e.g. a PDF preview) renders in the center/chat column and
+    // must not be painted over by that column's native web-HolaApp BrowserView.
+    // But it is NOT rendered while a full-area workspace overlay (Discover/
+    // HolaEmployee/…) is open — those live in a different render branch — so it
+    // must not suspend the OVERLAY's own web surface, or opening a preview then
+    // navigating to Discover leaves Discover permanently blank. Gate on there
+    // being no active overlay.
+    (get(workspaceOverlayAtom) === null &&
+      get(activeInternalTabIdAtom) !== null) ||
     get(overlayOpenCountAtom) > 0,
 );
