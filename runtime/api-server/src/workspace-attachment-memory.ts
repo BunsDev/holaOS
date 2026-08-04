@@ -4516,6 +4516,12 @@ function ensureWorkspaceOutputArtifactTreesBackfilled(params: {
     if (existingOutputIds.has(output.id)) {
       continue;
     }
+    // Same exclusion as the per-turn path: without it this one-shot backfill
+    // would re-index every historical tool result on a fresh install, exactly
+    // the flood the per-turn filter exists to prevent.
+    if (isToolResultOutput(output)) {
+      continue;
+    }
     persistWorkspaceOutputDocumentTreeFromOutput({
       store: params.store,
       workspaceId: params.workspaceId,
@@ -5506,6 +5512,34 @@ export async function persistTurnInputAttachmentsAsDocuments(params: {
   return treeIds;
 }
 
+/**
+ * Path segment the harness offloads capped tool results to
+ * (`outputs/.tool-results/<tool>-<call_id>.json`, TOOL_OUTPUT_OVERFLOW_DIR in
+ * harness-host/pi.ts). Kept as a literal rather than imported: api-server does
+ * not depend on harness-host, and this is a stable on-disk layout.
+ */
+const TOOL_RESULT_OUTPUT_DIR_SEGMENT = "outputs/.tool-results/";
+
+/**
+ * Tool results are transcript/evidence, not durable semantic knowledge — the
+ * same rationale already applied to integration tool results in
+ * turn-memory-writeback. They are high-volume, machine-generated, and often
+ * binary: a screenshot arrives as JSON carrying a base64 PNG, so the mime guard
+ * treats it as prose and one call chunks into ~5k nodes.
+ *
+ * Measured on a real workspace before this filter: tool-result artifacts were
+ * 99.5% of semantic memory (69,146 of 69,463 nodes) and 512 of 603 trees, of
+ * which 56% was base64 screenshot data. That flooded the single global graph
+ * every context recalls from, and made per-tree retrieval scale with junk.
+ *
+ * Durable capture is the agent-invoked `remember` tool. The files stay on disk
+ * and remain fully retrievable by path — only the memory indexing is skipped.
+ */
+function isToolResultOutput(output: { filePath?: string | null }): boolean {
+  const normalized = (output.filePath ?? "").replace(/\\/g, "/");
+  return normalized.includes(TOOL_RESULT_OUTPUT_DIR_SEGMENT);
+}
+
 export async function persistTurnOutputArtifactsAsDocuments(params: {
   store: RuntimeStateStore;
   turnResult: TurnResultRecord;
@@ -5519,7 +5553,7 @@ export async function persistTurnOutputArtifactsAsDocuments(params: {
     inputId: params.turnResult.inputId,
     limit: 10_000,
     offset: 0,
-  }).filter((output) => output.status !== "deleted");
+  }).filter((output) => output.status !== "deleted" && !isToolResultOutput(output));
   if (outputs.length === 0) {
     return [];
   }
