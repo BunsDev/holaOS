@@ -25,6 +25,8 @@ const WORKSPACE_IDENTITY_FILENAME = "workspace_id";
 const LEGACY_WORKSPACE_METADATA_FILENAME = "workspace.json";
 const DELETED_WORKSPACE_PATH_TOMBSTONE_PREFIX = "__deleted__";
 const WORKSPACE_IDENTITY_LOCK_FILENAME = `${WORKSPACE_IDENTITY_FILENAME}.lock`;
+/** Bump to re-ANALYZE when semantic-memory index coverage changes. */
+const SEMANTIC_MEMORY_PLANNER_STATS_MARKER = "semantic_memory_nodes_analyze_v1";
 const WORKSPACE_IDENTITY_WRITE_RETRY_ATTEMPTS = 3;
 const WORKSPACE_IDENTITY_WRITE_RETRY_DELAY_MS = 25;
 const WORKSPACE_IDENTITY_LOCK_RETRY_ATTEMPTS = 20;
@@ -16166,6 +16168,17 @@ export class RuntimeStateStore {
       CREATE INDEX IF NOT EXISTS idx_semantic_memory_nodes_tree_path
           ON semantic_memory_nodes (${workspaceIdPrefix}category, tree_id, path);
 
+      -- Serves the per-tree candidate-pool lookup in listWorkspaceLexicalSupportHits,
+      -- which issues ONE listSemanticMemoryNodes query per integration tree on every
+      -- turn. Without this the planner picks the UNIQUE (workspace_id, category, path)
+      -- autoindex -- it satisfies the ORDER BY path prefix, so it avoids a sort but
+      -- then filters the whole table PER TREE. On a workspace with 603 trees / 69k
+      -- nodes that measured 26s of synchronous CPU per turn; with this index, 62ms
+      -- (424x, byte-identical result set + order). Column order matters: the five
+      -- equality predicates lead, so each lookup is a seek.
+      CREATE INDEX IF NOT EXISTS idx_semantic_memory_nodes_tree_class_status_path
+          ON semantic_memory_nodes (${workspaceIdPrefix}category, tree_id, node_class, status, path);
+
       CREATE TABLE IF NOT EXISTS semantic_memory_edges (
           ${prefix}category TEXT NOT NULL,
           tree_id TEXT NOT NULL,
@@ -16222,6 +16235,51 @@ export class RuntimeStateStore {
       CREATE INDEX IF NOT EXISTS idx_semantic_memory_evidence_refs_external_object
           ON semantic_memory_evidence_refs (${workspaceIdPrefix}category, tree_id, external_object_type, external_object_id);
     `);
+
+    this.ensureSemanticMemoryPlannerStats(params.db);
+  }
+
+  /**
+   * Creating idx_semantic_memory_nodes_tree_class_status_path is NOT sufficient on
+   * an existing database: with no stats in sqlite_stat1 the planner keeps choosing
+   * the UNIQUE (workspace_id, category, path) autoindex, because that one satisfies
+   * the `ORDER BY path` prefix. Measured on a real 603-tree / 69k-node workspace:
+   * index alone = no change at all (25.8s -> 25.5s), index + ANALYZE = 25.8s -> 70ms.
+   *
+   * So ANALYZE has to run once for the index to do anything. It is ~150ms on that
+   * workspace, and we gate it on a marker row so it does not run on every open —
+   * SQLite keeps sqlite_stat1 until the next ANALYZE, so once is enough.
+   */
+  private ensureSemanticMemoryPlannerStats(db: Database.Database): void {
+    const hasNodesTable = db
+      .prepare(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'semantic_memory_nodes' LIMIT 1",
+      )
+      .get();
+    if (!hasNodesTable) {
+      return;
+    }
+    try {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS semantic_memory_planner_stats (
+            marker TEXT PRIMARY KEY,
+            applied_at TEXT NOT NULL
+        );
+      `);
+      const alreadyAnalyzed = db
+        .prepare("SELECT 1 FROM semantic_memory_planner_stats WHERE marker = ? LIMIT 1")
+        .get(SEMANTIC_MEMORY_PLANNER_STATS_MARKER);
+      if (alreadyAnalyzed) {
+        return;
+      }
+      db.exec("ANALYZE semantic_memory_nodes");
+      db.prepare(
+        "INSERT OR REPLACE INTO semantic_memory_planner_stats (marker, applied_at) VALUES (?, ?)",
+      ).run(SEMANTIC_MEMORY_PLANNER_STATS_MARKER, utcNowIso());
+    } catch {
+      // Best effort: stale stats only cost query speed, never correctness, and a
+      // failure here must not block opening the store. The next open retries.
+    }
   }
 
   private ensureSemanticMemorySearchTableSchema(params: {
