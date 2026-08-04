@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { persistTurnOutputArtifactsAsDocuments } from "./workspace-attachment-memory.js";
+import {
+  persistTurnOutputArtifactsAsDocuments,
+  splitAttachmentTextIntoChunks,
+} from "./workspace-attachment-memory.js";
 
 // Tool results are transcript/evidence, not durable memory. Before this filter
 // they were 99.5% of one real workspace's semantic memory (69,146 of 69,463
@@ -88,4 +91,40 @@ test("deleted tool results and deleted ordinary outputs are both skipped", async
   ]);
   const trees = await persistTurnOutputArtifactsAsDocuments({ store, turnResult });
   assert.deepEqual(trees, [], "deleted outputs should not be indexed");
+});
+
+// splitAttachmentTextIntoChunks is the single choke point for every ingestion
+// path. It had no upper bound, so chunk count scaled with file size: one 2.1MB
+// screenshot JSON produced 4,960 chunks. Excluding tool results removes today's
+// worst offender, but a large attachment could reproduce it — hence the cap.
+
+test("a huge document cannot produce unbounded chunks", () => {
+  // ~2MB of paragraph-like text, the shape a big PDF/page dump extracts to.
+  const huge = Array.from({ length: 4000 }, (_v, i) => `paragraph ${i} ${"x".repeat(500)}`).join("\n\n");
+  const chunks = splitAttachmentTextIntoChunks(huge);
+  assert.ok(
+    chunks.length <= 200,
+    `expected the ingestion cap to bound chunks, got ${chunks.length}`,
+  );
+});
+
+test("a single enormous unbroken block is also capped", () => {
+  // No paragraph breaks — exercises the sliding-window branch, which was the
+  // path base64 blobs took (one long line with no structure).
+  const blob = "A".repeat(2_000_000);
+  const chunks = splitAttachmentTextIntoChunks(blob);
+  assert.ok(
+    chunks.length <= 200,
+    `expected the sliding-window branch to respect the cap, got ${chunks.length}`,
+  );
+});
+
+test("normal documents are unaffected by the cap", () => {
+  const doc = ["# Title", "First paragraph.", "Second paragraph."].join("\n\n");
+  const chunks = splitAttachmentTextIntoChunks(doc);
+  assert.ok(chunks.length >= 1, "a small document should still chunk");
+  assert.ok(chunks.length < 200, "a small document must not hit the cap");
+  // Content must survive intact — the cap must not corrupt ordinary indexing.
+  assert.ok(chunks.some((c) => c.content.includes("First paragraph.")));
+  assert.deepEqual(chunks.map((c) => c.index), chunks.map((_v, i) => i), "chunk indexes stay sequential");
 });

@@ -1858,7 +1858,25 @@ async function readReferencedImageUrlTextContent(params: {
   };
 }
 
-function splitAttachmentTextIntoChunks(value: string): AttachmentChunk[] {
+/**
+ * Hard ceiling on how many chunks ONE document contributes to semantic memory.
+ *
+ * This splitter is the single choke point for every ingestion path (outputs,
+ * attachments, image URLs, tool results), and it previously had no upper bound:
+ * chunk count scaled linearly with file size. One AdsPower screenshot — a 2.1MB
+ * JSON carrying a base64 PNG — became "document output with 4960 searchable
+ * chunks", i.e. 4,960 nodes + search docs + evidence refs + edges from a single
+ * tool call. Excluding tool results removes today's worst offender, but any
+ * large attachment could reproduce it, so the bound belongs here.
+ *
+ * 200 chunks is ~320KB of indexed text per document, far past what retrieval
+ * uses (maxChunksPerDocument is 2-4). Memory is a recall substrate, not storage:
+ * the full file stays on disk and remains retrievable by path, and the root node
+ * records the true chunk count so truncation is visible rather than silent.
+ */
+const MAX_DOCUMENT_CHUNKS = 200;
+
+export function splitAttachmentTextIntoChunks(value: string): AttachmentChunk[] {
   const normalized = value.trim();
   if (!normalized) {
     return [];
@@ -1869,8 +1887,10 @@ function splitAttachmentTextIntoChunks(value: string): AttachmentChunk[] {
     .filter(Boolean);
   const chunks: AttachmentChunk[] = [];
   let current = "";
+  const atCap = () => chunks.length >= MAX_DOCUMENT_CHUNKS;
   const flush = () => {
-    if (!current.trim()) {
+    if (!current.trim() || atCap()) {
+      current = "";
       return;
     }
     const next = current.trim();
@@ -1882,6 +1902,9 @@ function splitAttachmentTextIntoChunks(value: string): AttachmentChunk[] {
     current = "";
   };
   for (const block of paragraphLike.length > 0 ? paragraphLike : [normalized]) {
+    if (atCap()) {
+      break;
+    }
     if ((current.length + block.length + 2) <= 1600) {
       current = current ? `${current}\n\n${block}` : block;
       continue;
@@ -1895,6 +1918,9 @@ function splitAttachmentTextIntoChunks(value: string): AttachmentChunk[] {
     }
     let start = 0;
     while (start < block.length) {
+      if (atCap()) {
+        break;
+      }
       const end = Math.min(block.length, start + 1600);
       const slice = block.slice(start, end).trim();
       if (slice) {
