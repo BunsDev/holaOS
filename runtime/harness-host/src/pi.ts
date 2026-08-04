@@ -113,6 +113,7 @@ import { createPiDocumentReadToolDefinitions } from "./pi-document-read-tool.js"
 import { downscaleInlineImage } from "./image-downscale.js";
 import { wrapToolWithImageCap } from "./tool-image-cap.js";
 import { createPiSearchToolDefinition } from "./pi-search-tool.js";
+import { consolidateRuntimeToolFamilies } from "./consolidate-tool-family.js";
 import { installBenignStdioEpipeGuard } from "./stdio-epipe.js";
 import {
   type CapturedUpstreamError,
@@ -2860,11 +2861,9 @@ async function defaultCreateSession(request: HarnessHostPiRequest): Promise<PiSe
   const skillDirs = resolvePiSkillDirs(request);
   const loadedSkills = loadPiSkills(skillDirs);
   const skillMetadataByAlias = buildPiSkillMetadataByAlias(loadedSkills.skills);
-  const todoTools = filterPiToolDefinitionsForRequest(request, createPiTodoToolDefinitions({
-    stateDir,
-    sessionId: request.session_id,
-    allowBlockedStatus: request.workflow_owned_subagent !== true,
-  }));
+  // todowrite/todoread are no longer injected into the per-turn tool set: their
+  // schemas were ~6KB of EVERY request (even a bare "hi") for little practical
+  // value. createPiTodoToolDefinitions stays exported for tests / other callers.
   const browserTools = request.browser_tools_enabled
     ? filterPiToolDefinitionsForRequest(
         request,
@@ -2922,7 +2921,9 @@ async function defaultCreateSession(request: HarnessHostPiRequest): Promise<PiSe
       })
     )
   );
-  const runtimeToolsForHost = filterPiRuntimeToolDefinitionsForHost(runtimeTools);
+  const runtimeToolsForHost = consolidateRuntimeToolFamilies(
+    filterPiRuntimeToolDefinitionsForHost(runtimeTools),
+  );
   const composioInline = await timedSetup("composio_inline", () =>
     resolveComposioInlineTools({
       runtimeApiBaseUrl: request.runtime_api_base_url ?? null,
@@ -2956,7 +2957,6 @@ async function defaultCreateSession(request: HarnessHostPiRequest): Promise<PiSe
   );
   const nonSkillCustomTools: ToolDefinition[] = sanitizeToolSchemas("custom", [
     ...documentReadTools,
-    ...todoTools,
     ...(browserTools as unknown as ToolDefinition[]),
     ...(runtimeToolsForHost as unknown as ToolDefinition[]),
     ...(composioInline.tools as unknown as ToolDefinition[]),
