@@ -613,6 +613,12 @@ export async function executeRunnerRequest(
   let ttftSessionSetupMs: number | null = null;
   let ttftSetupBreakdown: Record<string, unknown> | null = null;
   let ttftFirstTokenAtMs: number | null = null;
+  // First model response's token accounting (prefill size + cache-read), so the
+  // [ttft] line shows whether model_ttft was a cache MISS (full prefill) or a warm
+  // HIT. Populated from the run_completed usage payload, available by run-end when
+  // the line is logged.
+  let ttftInputTokens: number | null = null;
+  let ttftCachedInputTokens: number | null = null;
   const captureTtft = (event: RunnerEvent): void => {
     if (ttftFirstEventAtMs === null) {
       ttftFirstEventAtMs = Date.now();
@@ -653,6 +659,22 @@ export async function executeRunnerRequest(
         event.event_type === "skill_invocation")
     ) {
       ttftFirstTokenAtMs = Date.now();
+    }
+    if (
+      ttftInputTokens === null &&
+      (event.event_type === "run_completed" ||
+        event.event_type === "run_failed")
+    ) {
+      const usage = (event.payload as Record<string, unknown> | undefined)?.usage;
+      if (usage !== null && typeof usage === "object") {
+        const u = usage as Record<string, unknown>;
+        if (typeof u.input_tokens === "number") {
+          ttftInputTokens = u.input_tokens;
+        }
+        if (typeof u.cached_input_tokens === "number") {
+          ttftCachedInputTokens = u.cached_input_tokens;
+        }
+      }
     }
   };
   let child;
@@ -909,7 +931,12 @@ export async function executeRunnerRequest(
         `harness_load_ms=${harnessLoadMs ?? "n/a"} ` +
         `session_setup_ms=${ttftSessionSetupMs ?? "n/a"} ` +
         `model_ttft_ms=${modelTtftMs ?? "n/a"} ` +
-        `total_ttft_ms=${totalMs ?? "n/a"}` +
+        `total_ttft_ms=${totalMs ?? "n/a"} ` +
+        `input_tokens=${ttftInputTokens ?? "n/a"} ` +
+        `cache_read=${ttftCachedInputTokens ?? "n/a"}` +
+        (ttftInputTokens && ttftInputTokens > 0 && ttftCachedInputTokens !== null
+          ? ` cache_hit=${Math.round((ttftCachedInputTokens / ttftInputTokens) * 100)}%`
+          : "") +
         (setupBreakdown ? ` setup=[${setupBreakdown}]` : ""),
     );
   }
