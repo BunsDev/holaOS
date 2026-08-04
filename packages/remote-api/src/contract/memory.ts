@@ -53,6 +53,11 @@ const browseGraphInput = workspaceScoped.extend({
   maxNodes: z.number().int().nullish(),
 });
 
+// Destructive: wipes this workspace's durable memory (semantic + interaction
+// rows and the on-disk mirror). Separate from `upsert`/`sync` because it is not
+// a content edit — the desktop gates it behind a confirm.
+const clearInput = workspaceScoped;
+
 export const memoryContract = {
   search: oc.input(searchInput).output(memoryResult),
   get: oc.input(getInput).output(memoryResult),
@@ -63,4 +68,5 @@ export const memoryContract = {
   readFile: oc.input(readFileInput).output(memoryResult),
   readNodeDetail: oc.input(readNodeDetailInput).output(memoryResult),
   browseGraph: oc.input(browseGraphInput).output(memoryResult),
+  clear: oc.input(clearInput).output(memoryResult),
 };

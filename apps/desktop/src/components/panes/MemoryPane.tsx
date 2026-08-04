@@ -8,6 +8,7 @@ import {
   MoreHorizontal,
   RefreshCw,
   Search,
+  Trash2,
 } from "@/components/ui/icons";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
@@ -21,6 +22,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { EmptyState } from "@/components/ui/empty-state";
 import { cn } from "@/lib/utils";
 import { useWorkspaceDesktop } from "@/lib/workspaceDesktop";
@@ -897,6 +899,39 @@ export function MemoryPane({ embedded }: { embedded?: boolean } = {}) {
     void loadGraph(selectedGraphNodeId);
   }, [loadGraph, loadTree, selectedGraphNodeId, selectedPath]);
 
+  // Clearing is destructive and unrecoverable, so it is confirm-gated and lives
+  // in the overflow menu rather than as a bare toolbar button.
+  const [confirmClearOpen, setConfirmClearOpen] = useState(false);
+  const [clearing, setClearing] = useState(false);
+
+  const handleClearMemory = useCallback(async () => {
+    if (!workspaceId) {
+      return;
+    }
+    setClearing(true);
+    try {
+      // Workspace resolves server-side (resolveCanonicalWs), same as browseTree.
+      await remoteApi.memory.clear({});
+      // Drop local selection first: the node/file it pointed at no longer
+      // exists, and reloading with a stale target renders a "missing" error
+      // instead of the empty state.
+      setSelectedPath(null);
+      setSelectedFile(null);
+      setSelectedNodeDetail(null);
+      setSelectedGraphNodeId(null);
+      await Promise.all([loadTree(null), loadGraph(null)]);
+    } catch (err) {
+      // Surface on the tree pane: it is always mounted, whereas the file/graph
+      // error slots depend on the current view mode.
+      setTreeError(
+        err instanceof Error ? err.message : "Failed to clear memory."
+      );
+    } finally {
+      setClearing(false);
+      setConfirmClearOpen(false);
+    }
+  }, [loadGraph, loadTree, workspaceId]);
+
   const handleSelectFile = useCallback(
     (targetPath: string) => {
       setViewMode("file");
@@ -1180,6 +1215,16 @@ export function MemoryPane({ embedded }: { embedded?: boolean } = {}) {
                       className={cn("size-3.5", refreshing && "animate-spin")}
                     />
                     Refresh
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => setConfirmClearOpen(true)}
+                    disabled={clearing || !workspaceId}
+                    className="text-destructive"
+                  >
+                    <Trash2
+                      className={cn("size-3.5", clearing && "animate-pulse")}
+                    />
+                    Clear memory…
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
@@ -1582,6 +1627,16 @@ export function MemoryPane({ embedded }: { embedded?: boolean } = {}) {
         </div>
 
       </div>
+
+      <ConfirmDialog
+        open={confirmClearOpen}
+        onOpenChange={setConfirmClearOpen}
+        title="Clear all memory?"
+        description="Every remembered fact, entity and indexed document for this workspace is deleted, along with the files under .holaboss/memory. Chats, outputs and files are not touched. This can't be undone."
+        confirmLabel={clearing ? "Clearing…" : "Clear memory"}
+        destructive
+        onConfirm={() => void handleClearMemory()}
+      />
     </SettingsCard>
   );
 }

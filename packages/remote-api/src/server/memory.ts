@@ -36,6 +36,10 @@ const browseGraph = os.memory.browseGraph.handler(({ input, context }) =>
   context.memory.browseGraph(input)
 );
 
+const clear = os.memory.clear.handler(({ input, context }) =>
+  context.memory.clear(input)
+);
+
 export const memoryRouter = {
   search,
   get,
@@ -46,4 +50,5 @@ export const memoryRouter = {
   readFile,
   readNodeDetail,
   browseGraph,
+  clear,
 };

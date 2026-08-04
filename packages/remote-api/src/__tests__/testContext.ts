@@ -34,6 +34,7 @@ function baseContext(): Omit<RemoteApiContext, "identity"> {
       readFile: notUsed,
       readNodeDetail: notUsed,
       browseGraph: notUsed,
+      clear: notUsed,
     },
     outputs: { list: notUsed },
     notifications: { list: notUsed, update: notUsed },

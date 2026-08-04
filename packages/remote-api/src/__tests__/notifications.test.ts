@@ -18,6 +18,7 @@ const memoryStub: RemoteApiContext["memory"] = {
   readFile: () => ({}),
   readNodeDetail: () => ({}),
   browseGraph: () => ({}),
+      clear: () => ({}) as never,
 };
 
 const outputsStub: RemoteApiContext["outputs"] = {

@@ -3129,6 +3129,12 @@ export function buildRuntimeApiServer(options: BuildRuntimeApiServerOptions = {}
             maxLayers: input.maxLayers ?? null,
             maxNodes: input.maxNodes ?? null,
           }) as unknown as Promise<Record<string, unknown>>,
+        clear: () => {
+          const { deletedRows, deletedFiles } = store.clearWorkspaceMemory({
+            workspaceId: resolveCanonicalWs(),
+          });
+          return { ok: true, deleted_rows: deletedRows, deleted_files: deletedFiles };
+        },
       },
       outputs: {
         list: (input) => {

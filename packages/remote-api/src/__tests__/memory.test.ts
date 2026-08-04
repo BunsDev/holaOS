@@ -18,6 +18,7 @@ function makeMemory(): MemoryService {
     readFile: (input) => ({ path: input.path, content: "file body" }),
     readNodeDetail: (input) => ({ node_id: input.nodeId }),
     browseGraph: (input) => ({ forest: input.forest, nodes: [], edges: [] }),
+    clear: (input) => ({ ok: true, workspace_id: input.workspaceId, deleted_rows: 12, deleted_files: 3 }),
   };
 }
 
@@ -70,5 +71,17 @@ describe("remoteApiRouter.memory", () => {
       path: "preference/x.md",
     });
     expect(result.content).toBe("file body");
+  });
+
+  // Destructive op — routed like the rest, but the desktop gates it behind a
+  // confirm. Pinning it here so the route cannot be dropped silently.
+  it("routes the destructive clear and returns what was removed", async () => {
+    const client = makeClient();
+    const result = await client.memory.clear({});
+    expect(result).toMatchObject({
+      ok: true,
+      deleted_rows: 12,
+      deleted_files: 3,
+    });
   });
 });

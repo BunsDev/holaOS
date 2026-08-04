@@ -10063,6 +10063,106 @@ export class RuntimeStateStore {
     return rows.map((row) => this.rowToSemanticMemoryNode(row));
   }
 
+  /**
+   * Wipe this workspace's durable memory: every semantic + interaction row and
+   * the on-disk mirror under `.holaboss/memory`.
+   *
+   * Both halves matter. Deleting only the rows leaves the markdown mirror behind
+   * as orphans (a manual purge that skipped it left ~69k stray files), and
+   * deleting only files leaves recall returning rows whose content is gone.
+   *
+   * Backfill-completion flags are deliberately NOT cleared: they gate one-shot
+   * imports that would re-ingest historical outputs as memory on the next boot,
+   * which would silently undo the wipe.
+   *
+   * sqlite-vec virtual tables are cleared through their shadow tables — the vec0
+   * module is not always loadable in every process that opens this DB, and a
+   * plain DELETE against the virtual table would throw there.
+   */
+  clearWorkspaceMemory(params: { workspaceId: string }): {
+    deletedRows: number;
+    deletedFiles: number;
+  } {
+    const db = this.workspaceRuntimeDb(params.workspaceId);
+    const rowTables = [
+      "semantic_memory_nodes",
+      "semantic_memory_edges",
+      "semantic_memory_relations",
+      "semantic_memory_evidence_refs",
+      "semantic_memory_search_docs",
+      "semantic_memory_search_fts",
+      "interaction_entities",
+      "interaction_leaves",
+      "interaction_node_embeddings",
+      "interaction_node_embedding_vec_chunks",
+      "interaction_node_embedding_vec_rowids",
+      "interaction_node_embedding_vec_vector_chunks00",
+      "interaction_node_embedding_vec_metadatachunks00",
+      "interaction_node_embedding_vec_metadatachunks01",
+      "interaction_node_embedding_vec_metadatachunks02",
+      "interaction_node_embedding_vec_metadatatext00",
+      "interaction_node_embedding_vec_metadatatext01",
+      "interaction_node_embedding_vec_metadatatext02",
+      "memory_recall_vec_chunks",
+      "memory_recall_vec_rowids",
+      "memory_recall_vec_vector_chunks00",
+      "memory_embedding_index",
+    ];
+    let deletedRows = 0;
+    const wipe = db.transaction(() => {
+      for (const table of rowTables) {
+        try {
+          deletedRows += db.prepare(`DELETE FROM "${table}"`).run().changes;
+        } catch {
+          // Table absent on this schema version (or a vec shadow that this
+          // build does not create) — nothing to clear.
+        }
+      }
+      try {
+        deletedRows += db
+          .prepare(
+            "DELETE FROM workspace_runtime_metadata WHERE key LIKE 'workspace_memory_batch_%'",
+          )
+          .run().changes;
+      } catch {
+        // Metadata bookkeeping only; its absence is not a failure.
+      }
+    });
+    wipe();
+
+    let deletedFiles = 0;
+    try {
+      const memoryDir = path.join(
+        this.workspaceDir(params.workspaceId),
+        WORKSPACE_RUNTIME_DIRNAME,
+        "memory",
+      );
+      const countFiles = (dir: string): number => {
+        let total = 0;
+        for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+          total += entry.isDirectory()
+            ? countFiles(path.join(dir, entry.name))
+            : 1;
+        }
+        return total;
+      };
+      if (fs.existsSync(memoryDir)) {
+        deletedFiles = countFiles(memoryDir);
+        for (const entry of fs.readdirSync(memoryDir)) {
+          fs.rmSync(path.join(memoryDir, entry), {
+            recursive: true,
+            force: true,
+          });
+        }
+      }
+    } catch {
+      // Rows are already gone; a mirror we could not remove is stale but inert,
+      // and must not fail the whole clear.
+    }
+
+    return { deletedRows, deletedFiles };
+  }
+
   listSemanticMemoryChildren(params: {
     category: SemanticMemoryCategory;
     workspaceId?: string | null;

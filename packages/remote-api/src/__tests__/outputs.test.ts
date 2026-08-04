@@ -13,6 +13,7 @@ const memoryStub: RemoteApiContext["memory"] = {
   readFile: () => ({}),
   readNodeDetail: () => ({}),
   browseGraph: () => ({}),
+      clear: () => ({}) as never,
 };
 
 function makeOutputs(): OutputsService {

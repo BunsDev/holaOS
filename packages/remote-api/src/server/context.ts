@@ -40,6 +40,7 @@ export interface MemoryService {
   browseGraph(
     input: MemoryInputs["browseGraph"]
   ): MaybePromise<MemoryOutputs["browseGraph"]>;
+  clear(input: MemoryInputs["clear"]): MaybePromise<MemoryOutputs["clear"]>;
 }
 
 /** The runtime-supplied implementation of the outputs domain. */
