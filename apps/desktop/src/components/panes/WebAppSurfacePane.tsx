@@ -19,6 +19,7 @@ import { Button } from "@/components/ui/button";
 import { Loader2, RefreshCw, X } from "@/components/ui/icons";
 import { cn } from "@/lib/utils";
 import { useStoplightCompensation } from "@/lib/StoplightContext";
+import { windowsCaptionGutterPx } from "@/lib/windowControls";
 
 // What each failure means to someone who just sees an empty pane. No error code
 // in the headline — the code is at the bottom for a bug report.
@@ -77,6 +78,7 @@ export function WebAppSurfacePane({
   const setActiveSurface = useSetAtom(activeWebAppSurfaceAtom);
   const activeSurface = useAtomValue(activeWebAppSurfaceAtom);
   const reserveStoplightGutter = useStoplightCompensation();
+  const captionGutter = windowsCaptionGutterPx();
   const sidebarCollapsed = useAtomValue(sidebarCollapsedAtom);
   const centerFullscreen = useAtomValue(centerFullscreenAtom);
   const [error, setError] = useState("");
@@ -342,7 +344,18 @@ export function WebAppSurfacePane({
         // renderer DOM, so without this strip it occludes that expand button when
         // the sidebar is collapsed. Persistent (not collapse-gated) so toggling
         // the sidebar doesn't shift the surface vertically.
-        <div className="window-drag flex h-9 shrink-0 items-center justify-end bg-background pr-3">
+        <div
+          className="window-drag flex h-9 shrink-0 items-center justify-end bg-background pr-3"
+          style={{
+            // This strip spans the full window width, so its right-aligned
+            // Refresh reaches the window's top-right corner — free on macOS
+            // (stoplights are top-LEFT) but exactly where Windows draws its
+            // minimize/restore/close cluster, which the button collided with.
+            // Push it left by the caption gutter; zero on macOS/Linux, so the
+            // base pr-3 still applies there.
+            paddingRight: captionGutter ? captionGutter : undefined,
+          }}
+        >
           {/* The header this surface drops carries the only Refresh, and a
               hosted feed is exactly the thing a user expects to be able to
               reload. Right-aligned, clear of the stoplight gutter. */}
