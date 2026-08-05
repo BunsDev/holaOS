@@ -557,6 +557,10 @@ export function ProfilesPane() {
       <ContactSalesDialog
         open={contactSalesOpen}
         onOpenChange={setContactSalesOpen}
+        onInstalled={() => {
+          setEngineAvailable(true);
+          void refresh();
+        }}
       />
       <input
         ref={fileInputRef}

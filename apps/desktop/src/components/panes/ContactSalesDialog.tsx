@@ -1,14 +1,18 @@
 /**
- * Contact Sales gate for the fingerprint Browser Profiles engine.
+ * Enable / install gate for the fingerprint Browser Profiles engine.
  *
- * Shown instead of the fingerprint editor when `FEATURES.fingerprintBrowser` is
- * off (the default) — the anti-detect engine is the licensed
- * `@holaboss/fingerprint-ee` package, loaded at runtime, so it's positioned as an
- * Enterprise capability. The primary CTA opens the sales URL in the default browser.
+ * Shown instead of the fingerprint editor when the engine isn't attached yet — the
+ * anti-detect engine is the licensed `@holaboss/fingerprint-ee` package, loaded at
+ * runtime (open-core). This dialog lets the user ATTACH it as a one-click plugin:
+ *   • "Install" — downloads the bundle from the configured source (if any),
+ *   • "Install from file…" — picks a downloaded `fingerprint-ee-*.zip`,
+ * both of which drop it into `<userData>/fingerprint-ee/` and activate it live (no
+ * restart). "Contact sales" remains for getting access/a license.
  */
+import { useCallback, useEffect, useState } from "react";
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
 import { Button, buttonVariants } from "@/components/ui/button";
-import { ShieldCheck, X } from "@/components/ui/icons";
+import { Loader2, ShieldCheck, X } from "@/components/ui/icons";
 import { cn } from "@/lib/utils";
 
 // Where "Contact sales" sends the user. Update to the real enterprise/contact page.
@@ -23,16 +27,73 @@ const BULLETS = [
 interface ContactSalesDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Called after the engine is successfully installed, so the pane can re-gate. */
+  onInstalled?: () => void;
 }
+
+type Progress = {
+  phase: "downloading" | "extracting" | "installing" | "done" | "error";
+  pct?: number;
+  message?: string;
+};
 
 export function ContactSalesDialog({
   open,
   onOpenChange,
+  onInstalled,
 }: ContactSalesDialogProps) {
+  const api = window.electronAPI?.profiles;
+  const [downloadAvailable, setDownloadAvailable] = useState(false);
+  const [installing, setInstalling] = useState(false);
+  const [progress, setProgress] = useState<Progress | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open || !api?.engineDownloadAvailable) {
+      return;
+    }
+    setError(null);
+    void api.engineDownloadAvailable().then(setDownloadAvailable);
+  }, [open, api]);
+
   const contactSales = () => {
     void window.electronAPI?.ui.openExternalUrl(CONTACT_SALES_URL);
     onOpenChange(false);
   };
+
+  const runInstall = useCallback(
+    async (source: "file" | "url") => {
+      if (!api) {
+        return;
+      }
+      setError(null);
+      setInstalling(true);
+      setProgress({ phase: "installing", message: "Starting…" });
+      const unsubscribe = api.onEngineInstallProgress?.((p) => setProgress(p));
+      try {
+        const result =
+          source === "file"
+            ? await api.installEngineFromFile()
+            : await api.installEngineFromUrl();
+        if ("canceled" in result && result.canceled) {
+          return; // user dismissed the file picker
+        }
+        if (result.ok) {
+          onInstalled?.();
+          onOpenChange(false);
+          return;
+        }
+        setError(result.error ?? "Install failed.");
+      } catch (e) {
+        setError((e as Error)?.message ?? "Install failed.");
+      } finally {
+        unsubscribe?.();
+        setInstalling(false);
+        setProgress(null);
+      }
+    },
+    [api, onInstalled, onOpenChange],
+  );
 
   return (
     <DialogPrimitive.Root onOpenChange={onOpenChange} open={open}>
@@ -87,24 +148,61 @@ export function ContactSalesDialog({
               ))}
             </ul>
             <p className="mt-4 text-muted-foreground text-xs">
-              Available on holaOS Enterprise.
+              Install the licensed engine to enable it here — it drops in and
+              activates without a restart.
             </p>
+            {error ? (
+              <p className="mt-3 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-destructive text-xs">
+                {error}
+              </p>
+            ) : null}
           </div>
 
-          <div className="flex shrink-0 items-center justify-end gap-2 border-border border-t px-6 py-4">
-            <DialogPrimitive.Close
-              render={
+          <div className="flex min-h-[36px] shrink-0 items-center gap-2 border-border border-t px-6 py-4">
+            {installing ? (
+              <div className="flex w-full items-center gap-3">
+                <Loader2 className="size-4 shrink-0 animate-spin text-violet-500" />
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-foreground text-sm">
+                    {progress?.message ?? "Installing…"}
+                    {typeof progress?.pct === "number"
+                      ? ` ${progress.pct}%`
+                      : ""}
+                  </p>
+                  {typeof progress?.pct === "number" ? (
+                    <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-fg-2">
+                      <div
+                        className="h-full rounded-full bg-violet-500 transition-all"
+                        style={{ width: `${progress.pct}%` }}
+                      />
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            ) : (
+              <>
                 <button
-                  className={buttonVariants({ variant: "outline" })}
+                  className={buttonVariants({ variant: "ghost" })}
+                  onClick={contactSales}
                   type="button"
                 >
-                  Maybe later
+                  Contact sales
                 </button>
-              }
-            />
-            <Button onClick={contactSales} type="button">
-              Contact sales
-            </Button>
+                <div className="flex-1" />
+                <button
+                  className={buttonVariants({ variant: "outline" })}
+                  onClick={() => void runInstall("file")}
+                  type="button"
+                >
+                  Install from file…
+                </button>
+                {downloadAvailable ? (
+                  <Button onClick={() => void runInstall("url")} type="button">
+                    Install
+                  </Button>
+                ) : null}
+              </>
+            )}
           </div>
         </DialogPrimitive.Popup>
       </DialogPrimitive.Portal>
