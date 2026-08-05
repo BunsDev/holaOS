@@ -373,7 +373,7 @@ declare global {
 		createdAt: string;
 		source: string;
 		importedFrom?: string;
-		engine?: "system" | "cloak";
+		engine?: "system" | "fingerprint";
 		fingerprint?: FingerprintPayload;
 		proxy?: ProfileProxyPayload;
 		/** True for the pinned default browser the agent drives when none is named. */
@@ -3171,11 +3171,17 @@ declare global {
 			import: (
 				payload: ProfileImportRequestPayload,
 			) => Promise<ProfileImportResultPayload>;
+			importSpreadsheet: (fileBytes: ArrayBuffer) => Promise<{
+				ok: boolean;
+				error?: string;
+				imported: number;
+				warnings: string[];
+			}>;
 			close: (profileId: string) => Promise<{ ok: boolean }>;
 			runningIds: () => Promise<string[]>;
 			setEngine: (
 				profileId: string,
-				engine: "system" | "cloak",
+				engine: "system" | "fingerprint",
 			) => Promise<BrowserProfilePayload[]>;
 			setFingerprint: (
 				profileId: string,
@@ -3183,7 +3189,7 @@ declare global {
 			) => Promise<BrowserProfilePayload[]>;
 			previewFingerprint: (
 				fingerprint: FingerprintPayload,
-			) => Promise<{ args: string[]; warnings: string[] }>;
+			) => Promise<{ warnings: string[] }>;
 			onRunningChange: (listener: (runningIds: string[]) => void) => () => void;
 		};
 		fingerprintTemplates: {

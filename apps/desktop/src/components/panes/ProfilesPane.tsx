@@ -8,7 +8,7 @@
  * Profiles are independent of workspace, so this pane takes no workspaceId.
  * Layout mirrors the sibling panes (Projects / Automations / Channels).
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { BrowserNameDialog } from "@/components/panes/BrowserNameDialog";
 import { ContactSalesDialog } from "@/components/panes/ContactSalesDialog";
 import { FingerprintDialog } from "@/components/panes/FingerprintDialog";
@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import {
   ChevronDown,
+  Loader2,
   Pencil,
   Plus,
   ShieldCheck,
@@ -73,6 +74,10 @@ export function ProfilesPane() {
   const [importOpen, setImportOpen] = useState(false);
   const [importNote, setImportNote] = useState<string | null>(null);
   const [running, setRunning] = useState<ReadonlySet<string>>(new Set());
+  // Profiles whose browser is starting but not yet live — the window can take a
+  // couple seconds to appear (fingerprint engine cold-start), so the Launch button
+  // shows a spinner in the gap between click and the pushed `running` update.
+  const [launching, setLaunching] = useState<ReadonlySet<string>>(new Set());
   const [pendingDelete, setPendingDelete] = useState<Profile | null>(null);
   const [fingerprintProfile, setFingerprintProfile] = useState<Profile | null>(
     null,
@@ -139,6 +144,34 @@ export function ProfilesPane() {
     [api],
   );
 
+  // Launch a profile with a live "Launching…" state on its card, so there's clear
+  // feedback while the browser starts (the window can take a beat to appear). The
+  // pushed `running` update flips the button to Close once it's actually live.
+  const beginLaunch = useCallback(
+    async (id: string, url?: string) => {
+      if (!api) {
+        return;
+      }
+      setLaunchError(null);
+      setLaunching((prev) => new Set(prev).add(id));
+      try {
+        const result = await api.launch(id, url);
+        setLaunchError(
+          result && !result.ok ? (result.error ?? "Failed to launch.") : null,
+        );
+      } catch (error) {
+        setLaunchError((error as Error)?.message ?? "Failed to launch.");
+      } finally {
+        setLaunching((prev) => {
+          const next = new Set(prev);
+          next.delete(id);
+          return next;
+        });
+      }
+    },
+    [api],
+  );
+
   const toggleLaunch = useCallback(
     async (id: string) => {
       if (!api) {
@@ -148,12 +181,9 @@ export function ProfilesPane() {
         await api.close(id);
         return;
       }
-      const result = await api.launch(id);
-      setLaunchError(
-        result && !result.ok ? (result.error ?? "Failed to launch.") : null,
-      );
+      await beginLaunch(id);
     },
-    [api, running],
+    [api, running, beginLaunch],
   );
 
   const onImported = useCallback(
@@ -171,6 +201,40 @@ export function ProfilesPane() {
       setImportNote(note);
     },
     [refresh],
+  );
+
+  // Import an AdsPower .xlsx export → fingerprint (cloak) profiles. The renderer
+  // reads the picked file to bytes; main hands them to the enterprise engine.
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const handleSpreadsheetSelected = useCallback(
+    async (event: React.ChangeEvent<HTMLInputElement>) => {
+      const file = event.target.files?.[0];
+      event.target.value = ""; // allow re-picking the same file later
+      if (!file || !api?.importSpreadsheet) {
+        return;
+      }
+      const bytes = await file.arrayBuffer();
+      const result = await api.importSpreadsheet(bytes);
+      if (!result.ok) {
+        setImportNote(result.error ?? "Import failed.");
+        return;
+      }
+      await refresh();
+      const extra =
+        result.warnings.length > 0
+          ? ` ${result.warnings[0]}${
+              result.warnings.length > 1
+                ? ` (+${result.warnings.length - 1} more)`
+                : ""
+            }`
+          : "";
+      setImportNote(
+        `Imported ${result.imported} profile${
+          result.imported === 1 ? "" : "s"
+        } from AdsPower.${extra}`,
+      );
+    },
+    [api, refresh],
   );
 
   const renderAddItems = () => (
@@ -192,6 +256,15 @@ export function ProfilesPane() {
         <UploadCloud className="size-4" />
         Import from browser…
       </DropdownMenuItem>
+      {FEATURES.fingerprintBrowser ? (
+        <DropdownMenuItem
+          className="gap-2 rounded-md px-2 py-1.5 text-[13px]"
+          onClick={() => fileInputRef.current?.click()}
+        >
+          <ShieldCheck className="size-4 text-violet-500" />
+          Import from AdsPower…
+        </DropdownMenuItem>
+      ) : null}
     </>
   );
 
@@ -254,6 +327,7 @@ export function ProfilesPane() {
               const isPermanent = profile.id === DEFAULT_PROFILE_ID;
               const isDefault = profile.isDefault ?? false;
               const isRunning = running.has(profile.id);
+              const isLaunching = launching.has(profile.id);
               return (
                 <div
                   key={profile.id}
@@ -274,13 +348,13 @@ export function ProfilesPane() {
                             Default
                           </span>
                         ) : null}
-                        {profile.engine === "cloak" ? (
+                        {profile.engine === "fingerprint" ? (
                           <span
                             className="inline-flex shrink-0 items-center gap-0.5 rounded bg-violet-500/15 px-1.5 py-0.5 font-medium text-[10px] text-violet-600 dark:text-violet-400"
-                            title="Fingerprint-spoofed (CloakBrowser) identity"
+                            title="Anti-detect fingerprint identity"
                           >
                             <ShieldCheck className="size-2.5" />
-                            Cloak
+                            Fingerprint
                           </span>
                         ) : null}
                       </div>
@@ -301,10 +375,20 @@ export function ProfilesPane() {
                       type="button"
                       size="sm"
                       variant={isRunning ? "outline" : "default"}
-                      className="h-7 px-2.5 text-xs"
+                      className="h-7 gap-1.5 px-2.5 text-xs"
+                      disabled={isLaunching}
                       onClick={() => void toggleLaunch(profile.id)}
                     >
-                      {isRunning ? "Close" : "Launch"}
+                      {isLaunching ? (
+                        <>
+                          <Loader2 className="size-3.5 animate-spin" />
+                          Launching…
+                        </>
+                      ) : isRunning ? (
+                        "Close"
+                      ) : (
+                        "Launch"
+                      )}
                     </Button>
                     <div className="flex items-center gap-1.5">
                       {isRunning ? (
@@ -448,20 +532,19 @@ export function ProfilesPane() {
         profile={fingerprintProfile}
         onSaved={(next) => setProfiles(next)}
         onTest={(profileId) => {
-          void api
-            ?.launch(profileId, "https://browserscan.net")
-            .then((result) =>
-              setLaunchError(
-                result && !result.ok
-                  ? (result.error ?? "Failed to launch.")
-                  : null,
-              ),
-            );
+          void beginLaunch(profileId, "https://browserscan.net");
         }}
       />
       <ContactSalesDialog
         open={contactSalesOpen}
         onOpenChange={setContactSalesOpen}
+      />
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        className="hidden"
+        onChange={handleSpreadsheetSelected}
       />
     </div>
   );

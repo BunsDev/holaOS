@@ -254,7 +254,7 @@ interface BrowserProfilePayload {
 	createdAt: string;
 	source: string;
 	importedFrom?: string;
-	engine?: "system" | "cloak";
+	engine?: "system" | "fingerprint";
 	fingerprint?: FingerprintPayload;
 	proxy?: ProfileProxyPayload;
 }
@@ -3080,13 +3080,20 @@ contextBridge.exposeInMainWorld("electronAPI", {
 				"profiles:import",
 				payload,
 			) as Promise<ProfileImportResultPayload>,
+		importSpreadsheet: (fileBytes: ArrayBuffer) =>
+			ipcRenderer.invoke("profiles:importSpreadsheet", fileBytes) as Promise<{
+				ok: boolean;
+				error?: string;
+				imported: number;
+				warnings: string[];
+			}>,
 		close: (profileId: string) =>
 			ipcRenderer.invoke("profiles:close", profileId) as Promise<{
 				ok: boolean;
 			}>,
 		runningIds: () =>
 			ipcRenderer.invoke("profiles:runningIds") as Promise<string[]>,
-		setEngine: (profileId: string, engine: "system" | "cloak") =>
+		setEngine: (profileId: string, engine: "system" | "fingerprint") =>
 			ipcRenderer.invoke("profiles:setEngine", profileId, engine) as Promise<
 				BrowserProfilePayload[]
 			>,
@@ -3100,7 +3107,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
 			ipcRenderer.invoke(
 				"profiles:previewFingerprint",
 				fingerprint,
-			) as Promise<{ args: string[]; warnings: string[] }>,
+			) as Promise<{ warnings: string[] }>,
 		onRunningChange: (listener: (runningIds: string[]) => void) => {
 			const wrapped = (
 				_event: Electron.IpcRendererEvent,

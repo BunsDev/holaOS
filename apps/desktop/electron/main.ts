@@ -234,12 +234,16 @@ import {
   setDefaultBrowserProfile,
 } from "./browser-pane/profile-store.js";
 import {
-  buildFingerprintArgs,
   FINGERPRINT_SEED_MAX,
   FINGERPRINT_SEED_MIN,
   sanitizeFingerprint,
+  sanitizeProxy,
   validateFingerprintCoherence,
 } from "./browser-pane/fingerprint.js";
+import {
+  type FingerprintServiceClient,
+  loadFingerprintService,
+} from "./browser-pane/fingerprint-engine-seam.js";
 import {
   addFingerprintTemplate,
   emptyFingerprintTemplateIndex,
@@ -342,6 +346,16 @@ const verboseTelemetryEnabled =
 const chromiumStderrLoggingEnabled =
   process.env.HOLABOSS_CHROMIUM_STDERR_LOGS?.trim() === "1";
 const HOME_URL = "https://www.google.com";
+// A fingerprint (anti-detect) profile lands here on a plain human Launch, so you
+// immediately see how the identity presents — IP/WebRTC/DNS leaks, timezone
+// coherence, canvas/WebGL, bot detection. Overridable per launch (a named URL) and
+// skipped for agent auto-launches (they land on about:blank to claim the tab).
+const FINGERPRINT_DEFAULT_LANDING_URL = "https://www.browserscan.net";
+// A launched fingerprint profile presents as the host product (not "Camoufox") in
+// the macOS dock / menu bar — the engine stamps this name + icon onto the shared
+// Camoufox.app bundle (see @holaboss/fingerprint-ee brand.ts). One constant to
+// change if we ever want a distinct browser sub-brand (e.g. "holaOS Browser").
+const FINGERPRINT_BROWSER_BRAND_NAME = "holaOS";
 const AUTH_POPUP_WIDTH = 380;
 const AUTH_POPUP_HEIGHT = 460;
 const AUTH_POPUP_CLOSE_DELAY_MS = 260;
@@ -20127,28 +20141,31 @@ const browserHttpService: BrowserHttpService = createBrowserHttpService({
   // control service routes its low-level ops to that real window over CDP
   // instead of the embedded Electron BrowserView.
   profileCdp: {
-    isLive: (profileId) => profileChromiumPort(profileId) !== null,
+    isLive: (profileId) =>
+      engineRunningIds.has(profileId) || profileChromiumPort(profileId) !== null,
     // Auto-launch on first drive: a browser tool targeting a not-yet-running
-    // profile spawns its real Chromium, so browsing always drives a profile
-    // window (the CDP connect retries until Chrome's debug port is listening).
-    // Land on about:blank (not HOME_URL) so the first drive CLAIMS that blank
-    // landing tab (see profile-cdp `activePage`) instead of opening a second tab
-    // and leaving a stray home page behind. Human-initiated launches (Browsers
-    // page / browser_launch_profile) still land on HOME_URL.
+    // profile spawns its real Chromium (or, for a cloak profile, starts it in the
+    // fingerprint service), so browsing always drives a profile window. Land on
+    // about:blank (not HOME_URL) so the first drive CLAIMS that blank landing tab
+    // (see profile-cdp / service `activePage`) instead of opening a second tab and
+    // leaving a stray home page behind.
     ensureLive: async (profileId) => {
       if (!isBrowserProfileId(profileId)) {
         return false;
       }
+      // Engine (cloak) profile → run through the fingerprint service.
+      if (engineRunningIds.has(profileId)) {
+        return true;
+      }
+      if (getBrowserProfile(browserProfileIndex, profileId)?.engine === "fingerprint") {
+        const result = await launchProfileChromium(profileId, "about:blank");
+        return result.ok && engineRunningIds.has(profileId);
+      }
       const trackedPort = profileChromiumPort(profileId);
       if (trackedPort !== null) {
-        // A SPAWNED instance we own is trustworthy — if its Chrome had died, the
-        // proc's exit would already have cleared the tracked port. But an ADOPTED
-        // instance (proc:null) counts as "running" forever, so a Chrome that has
-        // since been closed/crashed would be driven on a dead port: every call
-        // ECONNREFUSEs and the connect layer burns ~20s before failing, with no
-        // relaunch. For an adopted instance, relaunch when its port is
-        // DEFINITIVELY refused — never on a transient stall, so we don't tear
-        // down a live-but-busy browser mid-session.
+        // A SPAWNED instance we own is trustworthy. An ADOPTED instance
+        // (proc:null) counts as running forever, so relaunch only when its port is
+        // DEFINITIVELY refused — never on a transient stall.
         const instance = profileChromeInstances.get(profileId);
         const staleAdopted =
           instance?.proc === null &&
@@ -20167,6 +20184,9 @@ const browserHttpService: BrowserHttpService = createBrowserHttpService({
       return result.ok && profileChromiumPort(profileId) !== null;
     },
     openTab: (profileId, url, sessionId) => {
+      if (engineRunningIds.has(profileId)) {
+        return fingerprintServiceOrThrow().openTab(profileId, url, sessionId);
+      }
       const port = profileChromiumPort(profileId);
       if (port === null) {
         throw new Error("The profile browser is not running.");
@@ -20174,6 +20194,9 @@ const browserHttpService: BrowserHttpService = createBrowserHttpService({
       return profileCdpOpenTab(profileId, port, url, sessionId);
     },
     evaluate: (profileId, expression, sessionId) => {
+      if (engineRunningIds.has(profileId)) {
+        return fingerprintServiceOrThrow().evaluate(profileId, expression, sessionId);
+      }
       const port = profileChromiumPort(profileId);
       if (port === null) {
         throw new Error("The profile browser is not running.");
@@ -20181,6 +20204,9 @@ const browserHttpService: BrowserHttpService = createBrowserHttpService({
       return profileCdpEvaluate(profileId, port, expression, sessionId);
     },
     pageInfo: (profileId, sessionId) => {
+      if (engineRunningIds.has(profileId)) {
+        return fingerprintServiceOrThrow().pageInfo(profileId, sessionId);
+      }
       const port = profileChromiumPort(profileId);
       if (port === null) {
         throw new Error("The profile browser is not running.");
@@ -20188,6 +20214,9 @@ const browserHttpService: BrowserHttpService = createBrowserHttpService({
       return profileCdpPageInfo(profileId, port, sessionId);
     },
     navigate: (profileId, url, sessionId) => {
+      if (engineRunningIds.has(profileId)) {
+        return fingerprintServiceOrThrow().navigate(profileId, url, sessionId);
+      }
       const port = profileChromiumPort(profileId);
       if (port === null) {
         throw new Error("The profile browser is not running.");
@@ -20195,6 +20224,9 @@ const browserHttpService: BrowserHttpService = createBrowserHttpService({
       return profileCdpNavigate(profileId, port, url, sessionId);
     },
     screenshot: (profileId, options, sessionId) => {
+      if (engineRunningIds.has(profileId)) {
+        return fingerprintServiceOrThrow().screenshot(profileId, options, sessionId);
+      }
       const port = profileChromiumPort(profileId);
       if (port === null) {
         throw new Error("The profile browser is not running.");
@@ -20202,6 +20234,9 @@ const browserHttpService: BrowserHttpService = createBrowserHttpService({
       return profileCdpScreenshot(profileId, port, options, sessionId);
     },
     mouse: (profileId, x, y, action, sessionId) => {
+      if (engineRunningIds.has(profileId)) {
+        return fingerprintServiceOrThrow().mouse(profileId, x, y, action, sessionId);
+      }
       const port = profileChromiumPort(profileId);
       if (port === null) {
         throw new Error("The profile browser is not running.");
@@ -20209,6 +20244,9 @@ const browserHttpService: BrowserHttpService = createBrowserHttpService({
       return profileCdpMouse(profileId, port, x, y, action, sessionId);
     },
     keyboard: (profileId, options, sessionId) => {
+      if (engineRunningIds.has(profileId)) {
+        return fingerprintServiceOrThrow().keyboard(profileId, options, sessionId);
+      }
       const port = profileChromiumPort(profileId);
       if (port === null) {
         throw new Error("The profile browser is not running.");
@@ -20216,6 +20254,9 @@ const browserHttpService: BrowserHttpService = createBrowserHttpService({
       return profileCdpKeyboard(profileId, port, options, sessionId);
     },
     cookies: (profileId, filter, sessionId) => {
+      if (engineRunningIds.has(profileId)) {
+        return fingerprintServiceOrThrow().cookies(profileId, filter, sessionId);
+      }
       const port = profileChromiumPort(profileId);
       if (port === null) {
         throw new Error("The profile browser is not running.");
@@ -20223,6 +20264,12 @@ const browserHttpService: BrowserHttpService = createBrowserHttpService({
       return profileCdpCookies(profileId, port, filter, sessionId);
     },
     setCookie: (profileId, cookie) => {
+      if (engineRunningIds.has(profileId)) {
+        return fingerprintServiceOrThrow().setCookie(
+          profileId,
+          cookie as Record<string, unknown>,
+        );
+      }
       const port = profileChromiumPort(profileId);
       if (port === null) {
         throw new Error("The profile browser is not running.");
@@ -24370,6 +24417,46 @@ interface ProfileChromeInstance {
 
 const profileChromeInstances = new Map<string, ProfileChromeInstance>();
 
+// The fingerprint browser runs as its OWN process (see fingerprint-engine-seam
+// `loadFingerprintService`): a cloak profile's Camoufox + relay + driving all live
+// there, and the core drives it over IPC. We track the loaded client + the set of
+// running engine profiles (kept in sync by the service's `onRunningChanged`).
+let fingerprintService: FingerprintServiceClient | null = null;
+const engineRunningIds = new Set<string>();
+
+/** Load the fingerprint service once + subscribe to its running-set changes. */
+async function ensureFingerprintService(): Promise<FingerprintServiceClient | null> {
+  if (fingerprintService) {
+    return fingerprintService;
+  }
+  const client = await loadFingerprintService();
+  if (!client) {
+    return null;
+  }
+  fingerprintService = client;
+  client.onRunningChanged((ids) => {
+    engineRunningIds.clear();
+    for (const id of ids) {
+      engineRunningIds.add(id);
+    }
+    emitProfilesRunning();
+  });
+  return client;
+}
+
+/** The loaded fingerprint service, or throw — call sites gate on `engineRunningIds`. */
+function fingerprintServiceOrThrow(): FingerprintServiceClient {
+  if (!fingerprintService) {
+    throw new Error("The fingerprint browser is not running.");
+  }
+  return fingerprintService;
+}
+
+/** A cloak/engine profile is running while the service reports it running. */
+function engineProfileRunning(profileId: string): boolean {
+  return engineRunningIds.has(profileId);
+}
+
 /**
  * Resolve the STABLE, collision-free remote-debugging port for a profile,
  * persisting it onto the catalogue the first time (see
@@ -24663,7 +24750,7 @@ function profileChromeUserDataDir(
     // newer system Chrome stamped — Chromium SIGTRAPs on the version downgrade.
     // The two engines' cookies are encrypted differently anyway (§8: cloak = a
     // fresh identity), so separate dirs are correct, not just a crash workaround.
-    engine === "cloak" ? "cloak" : "chrome",
+    engine === "fingerprint" ? "fingerprint" : "chrome",
   );
 }
 
@@ -24724,14 +24811,13 @@ async function openUrlInProfileWindow(
   }
 }
 
-// --- Fingerprint (cloak) engine plumbing ------------------------------------
-// A `cloak` profile spawns the CloakBrowser stealth binary (instead of system
-// Chrome) with the profile's persisted fingerprint as `--fingerprint-*` flags,
-// then drives it over CDP exactly like a `system` profile. See
-// docs/cdp/fingerprint-profiles.md.
+// --- Fingerprint identity helpers -------------------------------------------
+// `fingerprint`-engine profiles run OUT-OF-PROCESS in the fingerprint service
+// (see launchEngineProfile). Only these small seed helpers, used when creating /
+// backfilling a profile's identity, live here.
 
-/** The fingerprint platform to seed a new cloak profile with — the host OS, so
- *  we never spoof Windows-on-Mac by default (a font/GPU mismatch tell). */
+/** The fingerprint platform to seed a new profile with — the host OS, so we never
+ *  spoof Windows-on-Mac by default (a font/GPU mismatch tell). */
 function hostFingerprintPlatform(): FingerprintPlatform {
   if (process.platform === "win32") {
     return "windows";
@@ -24747,81 +24833,9 @@ function randomFingerprintSeed(): number {
   return FINGERPRINT_SEED_MIN + Math.floor(Math.random() * span);
 }
 
-/** The stealth executable inside a `~/.cloakbrowser/chromium-<ver>` dir. */
-function cloakExecutableInDir(dir: string): string {
-  if (process.platform === "darwin") {
-    return path.join(dir, "Chromium.app", "Contents", "MacOS", "Chromium");
-  }
-  if (process.platform === "win32") {
-    return path.join(dir, "chrome.exe");
-  }
-  return path.join(dir, "chrome");
-}
-
-/**
- * Resolve the CloakBrowser stealth-Chromium binary: an explicit
- * `CLOAKBROWSER_BINARY_PATH` override, else the newest managed binary under
- * `~/.cloakbrowser/chromium-*` (downloaded by the cloakbrowser CLI). Null when
- * none is installed — the launcher surfaces an actionable error.
- */
-function resolveCloakBinary(): string | null {
-  const override = process.env.CLOAKBROWSER_BINARY_PATH;
-  if (override && existsSync(override)) {
-    return override;
-  }
-  const cacheDir = path.join(os.homedir(), ".cloakbrowser");
-  let entries: string[];
-  try {
-    entries = readdirSync(cacheDir);
-  } catch {
-    return null;
-  }
-  const dirs = entries
-    .filter((d) => d.startsWith("chromium-"))
-    .sort()
-    .reverse(); // newest version dir first
-  for (const d of dirs) {
-    const bin = cloakExecutableInDir(path.join(cacheDir, d));
-    if (existsSync(bin)) {
-      return bin;
-    }
-  }
-  return null;
-}
-
-/** The browser binary for a profile: Cloak for `cloak`, else system Chrome. */
+/** The browser binary for a (system) profile — the OS Chrome/Chromium/Edge/Brave. */
 function resolveProfileBrowserBinary(profile: BrowserProfile | null): string | null {
-  if (profile?.engine === "cloak") {
-    return resolveCloakBinary();
-  }
   return findChromiumBinary(profile ? profileLaunchFamily(profile.id) : null);
-}
-
-/**
- * Fingerprint (+ proxy) spawn args for a cloak profile. Seeds a stable
- * fingerprint on first launch (host platform; the user can re-spoof in the UI),
- * persisting it so the identity is a returning one.
- */
-async function ensureCloakFingerprintArgs(profileId: string): Promise<string[]> {
-  let profile = getBrowserProfile(browserProfileIndex, profileId);
-  if (profile && !profile.fingerprint) {
-    browserProfileIndex = ensureProfileFingerprint(
-      browserProfileIndex,
-      profileId,
-      randomFingerprintSeed(),
-      hostFingerprintPlatform(),
-    );
-    await saveBrowserProfiles();
-    profile = getBrowserProfile(browserProfileIndex, profileId);
-  }
-  if (!profile?.fingerprint) {
-    return [];
-  }
-  const args = buildFingerprintArgs(profile.fingerprint);
-  if (profile.proxy?.server) {
-    args.push(`--proxy-server=${profile.proxy.server}`);
-  }
-  return args;
 }
 
 /**
@@ -24842,7 +24856,7 @@ async function setBrowserProfileEngine(
       p.id === profileId ? { ...p, engine } : p,
     ),
   };
-  if (engine === "cloak") {
+  if (engine === "fingerprint") {
     browserProfileIndex = ensureProfileFingerprint(
       browserProfileIndex,
       profileId,
@@ -24877,7 +24891,7 @@ async function setBrowserProfileFingerprint(
     profile.fingerprint?.platform ??
     hostFingerprintPlatform();
   const fingerprint: ProfileFingerprint = { ...value, seed, platform };
-  const updated: BrowserProfile = { ...profile, engine: "cloak", fingerprint };
+  const updated: BrowserProfile = { ...profile, engine: "fingerprint", fingerprint };
   browserProfileIndex = {
     ...browserProfileIndex,
     profiles: browserProfileIndex.profiles.map((p) =>
@@ -24885,6 +24899,85 @@ async function setBrowserProfileFingerprint(
     ),
   };
   await saveBrowserProfiles();
+}
+
+/**
+ * Import fingerprint profiles from an anti-detect export (AdsPower `.xlsx`) via
+ * the enterprise engine seam. Each row becomes a `cloak` profile carrying its
+ * fingerprint + proxy; its cookies are staged for injection on first launch
+ * (reusing the pending-cookies path). Requires the licensed engine
+ * (`loadFingerprintService`); OSS builds return an actionable error.
+ */
+async function importFingerprintBrowserProfiles(
+  fileBytes: Uint8Array,
+): Promise<{ ok: boolean; error?: string; imported: number; warnings: string[] }> {
+  const service = await ensureFingerprintService();
+  if (!service) {
+    return {
+      ok: false,
+      error:
+        "The fingerprint browser is an enterprise feature and isn't available in this build.",
+      imported: 0,
+      warnings: [],
+    };
+  }
+  let parsed;
+  try {
+    parsed = await service.importProfiles(fileBytes);
+  } catch (error) {
+    return {
+      ok: false,
+      error: `Couldn't read that file: ${(error as Error).message}`,
+      imported: 0,
+      warnings: [],
+    };
+  }
+
+  const warnings: string[] = [];
+  let imported = 0;
+  for (const entry of parsed) {
+    const id = `${BROWSER_PROFILE_ID_PREFIX}${randomUUID()}`;
+    const { index } = addBrowserProfile(browserProfileIndex, {
+      id,
+      name: entry.name,
+      now: new Date().toISOString(),
+      source: "imported",
+      importedFrom: entry.group ? `AdsPower · ${entry.group}` : "AdsPower",
+    });
+    browserProfileIndex = index;
+
+    // Re-sanitize the (untrusted) imported fingerprint/proxy before persisting.
+    const { value } = sanitizeFingerprint(entry.fingerprint);
+    const fingerprint: ProfileFingerprint = {
+      ...value,
+      seed: typeof value.seed === "number" ? value.seed : randomFingerprintSeed(),
+      platform: value.platform ?? hostFingerprintPlatform(),
+    };
+    const proxy = entry.proxy ? sanitizeProxy(entry.proxy) : null;
+    browserProfileIndex = {
+      ...browserProfileIndex,
+      profiles: browserProfileIndex.profiles.map((p) =>
+        p.id === id
+          ? { ...p, engine: "fingerprint", fingerprint, ...(proxy ? { proxy } : {}) }
+          : p,
+      ),
+    };
+
+    // Stage the session cookies for injection on first launch. `EngineCookie`
+    // is structurally the pending `TransferableCookie` shape.
+    if (entry.cookies.length > 0) {
+      await writePendingImportedCookies(
+        profileChromeUserDataDir(id, "fingerprint"),
+        entry.cookies,
+      );
+    }
+    for (const w of entry.warnings) {
+      warnings.push(`${entry.name}: ${w}`);
+    }
+    imported += 1;
+  }
+  await saveBrowserProfiles();
+  return { ok: true, imported, warnings };
 }
 
 /**
@@ -24914,23 +25007,115 @@ async function seedPendingImportedCookies(
   }
 }
 
+/**
+ * Launch a `cloak` profile through the fingerprint SERVICE (its own process):
+ * the service starts Camoufox (persistent context) + the relay + driving; the core
+ * then injects any staged import cookies and opens the landing URL over IPC.
+ * Tracked in `engineRunningIds` (kept in sync by the service). Reuses the running
+ * browser (opens a tab) when already live.
+ */
+async function launchEngineProfile(
+  profileId: string,
+  profile: BrowserProfile,
+  url?: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const service = await ensureFingerprintService();
+  if (!service) {
+    return {
+      ok: false,
+      error:
+        "The fingerprint browser is an enterprise feature and isn't available in this build.",
+    };
+  }
+  // A caller-named URL (agent drive / open-tab) always wins over restore/landing.
+  const namedUrl =
+    typeof url === "string" && url.trim()
+      ? safeChromiumPositionalUrl(url.trim())
+      : null;
+
+  // Already running (per the service): open the named URL as a new tab.
+  if (engineRunningIds.has(profileId)) {
+    if (namedUrl) {
+      await service.openTab(profileId, namedUrl).catch(() => {});
+    }
+    return { ok: true };
+  }
+
+  const userDataDir = profileChromeUserDataDir(profileId, "fingerprint");
+  await fs.mkdir(userDataDir, { recursive: true });
+
+  let launchResult: { ok: boolean; restoredTabs?: number };
+  try {
+    launchResult = await service.launch({
+      id: profileId,
+      name: profile.name,
+      fingerprint: profile.fingerprint ?? {
+        seed: randomFingerprintSeed(),
+        platform: hostFingerprintPlatform(),
+      },
+      proxy: profile.proxy ?? null,
+      headless: false,
+      userDataDir,
+      branding: {
+        name: FINGERPRINT_BROWSER_BRAND_NAME,
+        icnsPath: fingerprintBrandIconPath(),
+      },
+    });
+  } catch (error) {
+    return {
+      ok: false,
+      error: `Couldn't start the fingerprint browser: ${(error as Error).message}`,
+    };
+  }
+  // Mark running eagerly so a drive call right after launch routes to the service
+  // (the service's runningChanged notification confirms it a beat later).
+  engineRunningIds.add(profileId);
+
+  // First launch after an import: seed the staged cookies into the persistent
+  // context (they then persist in the profile's user_data_dir), then open the
+  // landing page — all inside the service process.
+  try {
+    const pending = await readPendingImportedCookies(userDataDir);
+    if (pending.length > 0) {
+      await service.addCookies(profileId, pending);
+      await clearPendingImportedCookies(userDataDir);
+    }
+  } catch {
+    // Best-effort; leave the pending file so a later launch can retry.
+  }
+  // Where to land: a named URL wins; otherwise the service has already reopened
+  // the previous session's tabs — only fall back to the leak-check page when there
+  // was nothing to restore (a brand-new profile).
+  if (namedUrl) {
+    await service.navigate(profileId, namedUrl).catch(() => {});
+  } else if (!launchResult.restoredTabs) {
+    await service
+      .navigate(profileId, safeChromiumPositionalUrl(FINGERPRINT_DEFAULT_LANDING_URL))
+      .catch(() => {});
+  }
+
+  emitProfilesRunning();
+  return { ok: true };
+}
+
 async function launchProfileChromium(
   profileId: string,
   url?: string,
 ): Promise<{ ok: boolean; error?: string }> {
   const profile = getBrowserProfile(browserProfileIndex, profileId);
-  const isCloak = profile?.engine === "cloak";
+  // `cloak` profiles run through the enterprise fingerprint engine (Camoufox),
+  // not the detached-Chrome path below.
+  if (profile && profile.engine === "fingerprint") {
+    return launchEngineProfile(profileId, profile, url);
+  }
   const binary = resolveProfileBrowserBinary(profile);
   if (!binary) {
     return {
       ok: false,
-      error: isCloak
-        ? "CloakBrowser stealth binary not found. Set CLOAKBROWSER_BINARY_PATH, or install it (see docs/cdp/fingerprint-profiles.md)."
-        : "No Chrome / Chromium / Edge / Brave found. Install Google Chrome to use browser profiles.",
+      error:
+        "No Chrome / Chromium / Edge / Brave found. Install Google Chrome to use browser profiles.",
     };
   }
-  // A cloak profile spawns with its persisted fingerprint (seeded on first use).
-  const stealthArgs = isCloak ? await ensureCloakFingerprintArgs(profileId) : [];
   const userDataDir = profileChromeUserDataDir(profileId, profile?.engine);
   await fs.mkdir(userDataDir, { recursive: true });
   // Security: reject non-http(s)/about landing URLs and dash-prefixed argv
@@ -24998,7 +25183,6 @@ async function launchProfileChromium(
       `--remote-debugging-port=${port}`,
       "--no-first-run",
       "--no-default-browser-check",
-      ...stealthArgs,
       "--new-window",
       // `--` terminates flag parsing so the (validated) URL can never be read
       // as a Chromium flag.
@@ -25039,6 +25223,11 @@ function runningProfileChromiumIds(): string[] {
   const ids: string[] = [];
   for (const [id, instance] of profileChromeInstances) {
     if (profileChromeInstanceRunning(instance)) {
+      ids.push(id);
+    }
+  }
+  for (const id of engineRunningIds) {
+    if (!ids.includes(id)) {
       ids.push(id);
     }
   }
@@ -25188,6 +25377,15 @@ setInterval(() => {
  * during shutdown can't spawn a second instance on the same user-data-dir.
  */
 function closeProfileChromium(profileId: string): { ok: boolean } {
+  // Engine-backed (cloak) profile: the service owns the browser + relay; tell it to
+  // close. Delete eagerly so a re-launch doesn't see a stale entry (the service's
+  // runningChanged confirms).
+  if (engineRunningIds.has(profileId)) {
+    engineRunningIds.delete(profileId);
+    void fingerprintService?.close(profileId).catch(() => {});
+    emitProfilesRunning();
+    return { ok: true };
+  }
   const existing = profileChromeInstances.get(profileId);
   if (!existing) {
     return { ok: true };
@@ -25687,6 +25885,15 @@ function desktopAppIconPath(): string {
   return app.isPackaged
     ? path.join(process.resourcesPath, "icon.png")
     : path.join(__dirname, "..", "..", "resources", "icon.png");
+}
+
+// The `.icns` handed to the fingerprint engine to re-icon the Camoufox.app bundle
+// (the dock icon of a launched profile). Bundled to `process.resourcesPath` via
+// electron-builder `extraResources`; the repo copy in dev.
+function fingerprintBrandIconPath(): string {
+  return app.isPackaged
+    ? path.join(process.resourcesPath, "icon.icns")
+    : path.join(__dirname, "..", "..", "resources", "icon.icns");
 }
 
 function desktopStatusItemIconPath(): string {
@@ -26392,15 +26599,27 @@ app.whenReady().then(async () => {
       },
     ) => importBrowserProfileAsNewProfile(payload),
   );
-  // Opt a profile into the CloakBrowser fingerprint engine (or back to system
-  // Chrome). Switching to `cloak` seeds a fingerprint so the next launch spoofs.
+  // Import fingerprint profiles from an anti-detect export (AdsPower .xlsx). The
+  // renderer reads the picked file to bytes and passes them here; the enterprise
+  // engine parses them into cloak profiles (fingerprint + proxy + staged cookies).
+  handleTrustedIpc(
+    "profiles:importSpreadsheet",
+    ["main"],
+    async (_event, fileBytes: ArrayBuffer | Uint8Array) => {
+      const bytes =
+        fileBytes instanceof Uint8Array ? fileBytes : new Uint8Array(fileBytes);
+      return importFingerprintBrowserProfiles(bytes);
+    },
+  );
+  // Opt a profile into the fingerprint (anti-detect) engine, or back to system
+  // Chrome. Switching seeds a fingerprint so the next launch spoofs.
   handleTrustedIpc(
     "profiles:setEngine",
     ["main"],
     async (_event, profileId: string, engine: ProfileEngine) => {
       await setBrowserProfileEngine(
         profileId,
-        engine === "cloak" ? "cloak" : "system",
+        engine === "fingerprint" ? "fingerprint" : "system",
       );
       return listBrowserProfilePayloads();
     },
@@ -26413,8 +26632,8 @@ app.whenReady().then(async () => {
       return listBrowserProfilePayloads();
     },
   );
-  // Preview the flags + coherence warnings for an in-progress fingerprint edit
-  // (the editor's live preview) — pure, persists nothing.
+  // Coherence warnings for an in-progress fingerprint edit (the editor's live
+  // check) — pure, persists nothing.
   handleTrustedIpc(
     "profiles:previewFingerprint",
     ["main"],
@@ -26425,10 +26644,7 @@ app.whenReady().then(async () => {
         seed: typeof value.seed === "number" ? value.seed : FINGERPRINT_SEED_MIN,
         platform: value.platform ?? "windows",
       };
-      return {
-        args: buildFingerprintArgs(fingerprint),
-        warnings: validateFingerprintCoherence(fingerprint),
-      };
+      return { warnings: validateFingerprintCoherence(fingerprint) };
     },
   );
   // Fingerprint templates: built-in presets + user-saved/imported, reusable
