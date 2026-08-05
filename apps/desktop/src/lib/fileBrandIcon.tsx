@@ -2,12 +2,14 @@
  * FileBrandIcon — renders the official Microsoft Office brand mark for
  * Office file types (xlsx/docx/pptx and friends). Brand SVGs live in
  * src/assets/file-types/ as self-contained, multi-color gradient marks.
- * PDF is drawn rather than borrowed — Adobe's mark is a trademark.
+ * PDF and HTML are drawn rather than borrowed — Adobe's mark is a trademark,
+ * and HTML's conventional orange collides with PowerPoint at row size.
  * Anything we don't have a brand icon for falls back to FileTypeIcon.
  */
 
 import { useId } from "react";
 import excelMarkup from "@/assets/file-types/excel.svg?raw";
+import htmlMarkup from "@/assets/file-types/html.svg?raw";
 import pdfMarkup from "@/assets/file-types/pdf.svg?raw";
 import powerpointMarkup from "@/assets/file-types/powerpoint.svg?raw";
 import wordMarkup from "@/assets/file-types/word.svg?raw";
@@ -15,6 +17,8 @@ import { FileTypeIcon } from "@/lib/fileIcon";
 import { cn } from "@/lib/utils";
 
 const OFFICE_ICON_MARKUP: Record<string, string> = {
+  ".htm": htmlMarkup,
+  ".html": htmlMarkup,
   ".pdf": pdfMarkup,
   ".xls": excelMarkup,
   ".xlsx": excelMarkup,
