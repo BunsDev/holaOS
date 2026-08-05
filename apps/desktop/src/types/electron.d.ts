@@ -3178,6 +3178,30 @@ declare global {
 				warnings: string[];
 			}>;
 			fingerprintAvailable: () => Promise<boolean>;
+			installedEngineInfo: () => Promise<{
+				present: boolean;
+				version?: string;
+				dir: string;
+			}>;
+			engineDownloadAvailable: () => Promise<boolean>;
+			installEngineFromFile: () => Promise<{
+				ok: boolean;
+				canceled?: boolean;
+				error?: string;
+				info?: { present: boolean; version?: string; dir: string };
+			}>;
+			installEngineFromUrl: () => Promise<{
+				ok: boolean;
+				error?: string;
+				info?: { present: boolean; version?: string; dir: string };
+			}>;
+			onEngineInstallProgress: (
+				listener: (progress: {
+					phase: "downloading" | "extracting" | "installing" | "done" | "error";
+					pct?: number;
+					message?: string;
+				}) => void,
+			) => () => void;
 			close: (profileId: string) => Promise<{ ok: boolean }>;
 			runningIds: () => Promise<string[]>;
 			setEngine: (

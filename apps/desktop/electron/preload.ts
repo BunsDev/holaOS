@@ -3089,6 +3089,46 @@ contextBridge.exposeInMainWorld("electronAPI", {
 			}>,
 		fingerprintAvailable: () =>
 			ipcRenderer.invoke("profiles:fingerprintAvailable") as Promise<boolean>,
+		installedEngineInfo: () =>
+			ipcRenderer.invoke("fingerprint:installedInfo") as Promise<{
+				present: boolean;
+				version?: string;
+				dir: string;
+			}>,
+		engineDownloadAvailable: () =>
+			ipcRenderer.invoke("fingerprint:downloadAvailable") as Promise<boolean>,
+		installEngineFromFile: () =>
+			ipcRenderer.invoke("fingerprint:installFromFile") as Promise<{
+				ok: boolean;
+				canceled?: boolean;
+				error?: string;
+				info?: { present: boolean; version?: string; dir: string };
+			}>,
+		installEngineFromUrl: () =>
+			ipcRenderer.invoke("fingerprint:installFromUrl") as Promise<{
+				ok: boolean;
+				error?: string;
+				info?: { present: boolean; version?: string; dir: string };
+			}>,
+		onEngineInstallProgress: (
+			listener: (progress: {
+				phase: "downloading" | "extracting" | "installing" | "done" | "error";
+				pct?: number;
+				message?: string;
+			}) => void,
+		) => {
+			const wrapped = (_event: Electron.IpcRendererEvent, progress: unknown) =>
+				listener(
+					progress as {
+						phase: "downloading" | "extracting" | "installing" | "done" | "error";
+						pct?: number;
+						message?: string;
+					},
+				);
+			ipcRenderer.on("fingerprint:installProgress", wrapped);
+			return () =>
+				ipcRenderer.removeListener("fingerprint:installProgress", wrapped);
+		},
 		close: (profileId: string) =>
 			ipcRenderer.invoke("profiles:close", profileId) as Promise<{
 				ok: boolean;

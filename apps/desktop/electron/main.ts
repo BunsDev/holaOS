@@ -246,6 +246,13 @@ import {
   loadFingerprintService,
 } from "./browser-pane/fingerprint-engine-seam.js";
 import {
+  installedEngineInfo,
+  installFromUrl,
+  installFromZip,
+  type InstallProgress,
+  resolveEngineDownloadUrl,
+} from "./browser-pane/fingerprint-engine-installer.js";
+import {
   addFingerprintTemplate,
   emptyFingerprintTemplateIndex,
   type FingerprintTemplateIndex,
@@ -26619,6 +26626,49 @@ app.whenReady().then(async () => {
   handleTrustedIpc("profiles:fingerprintAvailable", ["main"], async () =>
     isFingerprintEnginePresent(),
   );
+  // --- One-click fingerprint engine installer (runtime plugin drop-in) ---
+  handleTrustedIpc("fingerprint:installedInfo", ["main"], async () =>
+    installedEngineInfo(),
+  );
+  handleTrustedIpc("fingerprint:downloadAvailable", ["main"], async () =>
+    resolveEngineDownloadUrl() !== null,
+  );
+  handleTrustedIpc("fingerprint:installFromFile", ["main"], async (event) => {
+    const pick = await dialog.showOpenDialog({
+      title: "Choose the fingerprint engine bundle",
+      properties: ["openFile"],
+      filters: [{ name: "Engine bundle", extensions: ["zip"] }],
+    });
+    if (pick.canceled || !pick.filePaths[0]) {
+      return { ok: false, canceled: true };
+    }
+    const onProgress = (p: InstallProgress) =>
+      event.sender.send("fingerprint:installProgress", p);
+    try {
+      const info = await installFromZip(pick.filePaths[0], onProgress);
+      return { ok: info.present, info };
+    } catch (error) {
+      const message = (error as Error).message;
+      onProgress({ phase: "error", message });
+      return { ok: false, error: message };
+    }
+  });
+  handleTrustedIpc("fingerprint:installFromUrl", ["main"], async (event) => {
+    const url = resolveEngineDownloadUrl();
+    if (!url) {
+      return { ok: false, error: "No engine download source is configured." };
+    }
+    const onProgress = (p: InstallProgress) =>
+      event.sender.send("fingerprint:installProgress", p);
+    try {
+      const info = await installFromUrl(url, onProgress);
+      return { ok: info.present, info };
+    } catch (error) {
+      const message = (error as Error).message;
+      onProgress({ phase: "error", message });
+      return { ok: false, error: message };
+    }
+  });
   // Opt a profile into the fingerprint (anti-detect) engine, or back to system
   // Chrome. Switching seeds a fingerprint so the next launch spoofs.
   handleTrustedIpc(

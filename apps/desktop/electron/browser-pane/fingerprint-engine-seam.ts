@@ -299,3 +299,18 @@ export async function loadFingerprintService(): Promise<FingerprintServiceClient
   }
   return cachedService;
 }
+
+/**
+ * Forget any loaded/absent engine so the next `load*` call re-resolves. Used after
+ * a runtime plugin install so the feature activates WITHOUT an app restart. Any
+ * forked service is disposed first.
+ */
+export function resetFingerprintEngineCache(): void {
+  try {
+    cachedService?.dispose();
+  } catch {
+    // best-effort
+  }
+  cached = undefined;
+  cachedService = undefined;
+}
