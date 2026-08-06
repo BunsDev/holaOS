@@ -14,6 +14,7 @@ import {
   isHeicAttachmentMimeType,
   replaceAttachmentExtension,
 } from "./heic-conversion";
+import { renderDocumentCover } from "./document-cover";
 import { normalizeInlineImageMaterialization } from "./image-normalization";
 import { app as electronApp } from "electron";
 
@@ -22301,6 +22302,66 @@ async function writeDocxFromHtml(
   return readFilePreview(absolutePath, workspaceId);
 }
 
+/** A sheet's first screenful as an HTML table. Only the leading rows: a cover
+ *  answers "what is in here", and 4000 rows scaled into a card answer nothing. */
+const COVER_SHEET_ROWS = 14;
+
+function escapeCoverHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+async function sheetBufferToCoverHtml(
+  buffer: Buffer,
+  extension: string,
+): Promise<string> {
+  const sheets = await buildTablePreviewSheets(buffer, extension);
+  const sheet = sheets[0];
+  if (!sheet) {
+    return "";
+  }
+  const head = sheet.hasHeaderRow && sheet.columns.length > 0
+    ? `<tr>${sheet.columns.map((c) => `<th>${escapeCoverHtml(c)}</th>`).join("")}</tr>`
+    : "";
+  const body = sheet.rows
+    .slice(0, COVER_SHEET_ROWS)
+    .map(
+      (row) =>
+        `<tr>${row.map((cell) => `<td>${escapeCoverHtml(cell ?? "")}</td>`).join("")}</tr>`,
+    )
+    .join("");
+  if (!(head || body)) {
+    return "";
+  }
+  return `<table>${head}${body}</table>`;
+}
+
+/** Render a shared document's first page to a PNG, or null when it has no cover
+ *  or anything fails. Never throws: the share proceeds without one. */
+async function buildDocumentCover(
+  targetPath: string,
+  workspaceId?: string | null,
+): Promise<Uint8Array | null> {
+  try {
+    const { absolutePath } = await resolveWorkspaceScopedExplorerPath(
+      targetPath,
+      workspaceId,
+    );
+    const extension = path.extname(absolutePath).toLowerCase();
+    const png = await renderDocumentCover(absolutePath, async (buffer) => {
+      if (extension === ".doc" || extension === ".docx") {
+        return await renderDocumentBufferToHtml(buffer);
+      }
+      return await sheetBufferToCoverHtml(buffer, extension);
+    });
+    return png ? new Uint8Array(png) : null;
+  } catch {
+    return null;
+  }
+}
+
 async function readFileBytes(
   targetPath: string,
   workspaceId?: string | null,
@@ -26524,6 +26585,12 @@ app.whenReady().then(async () => {
       html: unknown,
       workspaceId?: string | null,
     ) => writeDocxFromHtml(targetPath, html, workspaceId),
+  );
+  handleTrustedIpc(
+    "fs:buildDocumentCover",
+    ["main"],
+    async (_event, targetPath: string, workspaceId?: string | null) =>
+      buildDocumentCover(targetPath, workspaceId),
   );
   handleTrustedIpc(
     "fs:readFileBytes",

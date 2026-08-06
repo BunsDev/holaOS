@@ -252,6 +252,8 @@ const SHARE_DOC_MIME: Record<string, string> = {
   ".csv": "text/csv",
   ".md": "text/markdown",
   ".txt": "text/plain",
+  ".htm": "text/html",
+  ".html": "text/html",
 };
 const MAX_SHARE_FILE_BYTES = 50 * 1024 * 1024;
 
@@ -303,10 +305,25 @@ export async function gatherShareFiles(
       if (bytes.length === 0 || bytes.length > MAX_SHARE_FILE_BYTES) {
         continue;
       }
+      // Best-effort and sequential: a cover is worth a moment of the share, not
+      // a failed one, and rendering opens a window per document.
+      let coverBase64: string | undefined;
+      try {
+        const cover = await window.electronAPI.fs.buildDocumentCover(
+          path,
+          workspaceId
+        );
+        if (cover && cover.length > 0) {
+          coverBase64 = bytesToBase64(cover);
+        }
+      } catch {
+        coverBase64 = undefined;
+      }
       files.push({
         fileName: baseName(path),
         contentType: SHARE_DOC_MIME[ext],
         dataBase64: bytesToBase64(bytes),
+        ...(coverBase64 ? { coverBase64 } : {}),
       });
     } catch {
       // Unreadable output — skip it.

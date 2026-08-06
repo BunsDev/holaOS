@@ -1384,6 +1384,12 @@ contextBridge.exposeInMainWorld("electronAPI", {
 				html,
 				workspaceId,
 			) as Promise<FilePreviewPayload>,
+		buildDocumentCover: (targetPath: string, workspaceId?: string | null) =>
+			ipcRenderer.invoke(
+				"fs:buildDocumentCover",
+				targetPath,
+				workspaceId,
+			) as Promise<Uint8Array | null>,
 		readFileBytes: (targetPath: string, workspaceId?: string | null) =>
 			ipcRenderer.invoke(
 				"fs:readFileBytes",

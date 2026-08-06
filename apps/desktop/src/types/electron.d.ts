@@ -2273,6 +2273,10 @@ declare global {
 				html: string,
 				workspaceId?: string | null,
 			) => Promise<FilePreviewPayload>;
+			buildDocumentCover: (
+				targetPath: string,
+				workspaceId?: string | null,
+			) => Promise<Uint8Array | null>;
 			readFileBytes: (
 				targetPath: string,
 				workspaceId?: string | null,

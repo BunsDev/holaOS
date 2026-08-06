@@ -322,6 +322,10 @@ export interface ShareDraftFile {
   fileName: string;
   contentType: string;
   dataBase64: string;
+  /** PNG of the document's first page. Rendered by the sharer, whose machine is
+   *  the only one holding both the bytes and the parsers; absent when the type
+   *  has no cover or rendering failed, which the reader sees as today's icon. */
+  coverBase64?: string;
 }
 
 /** One turn of a shared conversation — text + its captured media/files. No
