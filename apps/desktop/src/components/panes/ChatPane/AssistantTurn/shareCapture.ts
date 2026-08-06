@@ -284,6 +284,37 @@ export function isShareableOutput(output: ShareableOutput): boolean {
   return isShareableMediaOutput(output) || isShareableDocOutput(output);
 }
 
+/** A rendered first page, keyed so the picker and the share that follows it
+ *  don't each pay for the same window. Null is cached too — a type with no
+ *  cover shouldn't be retried on every render. */
+const coverCache = new Map<string, string | null>();
+
+export async function documentCoverBase64(
+  filePath: string,
+  workspaceId: string | null
+): Promise<string | null> {
+  if (!workspaceId) {
+    return null;
+  }
+  const key = `${workspaceId}::${filePath}`;
+  const cached = coverCache.get(key);
+  if (cached !== undefined) {
+    return cached;
+  }
+  let cover: string | null = null;
+  try {
+    const bytes = await window.electronAPI.fs.buildDocumentCover(
+      filePath,
+      workspaceId
+    );
+    cover = bytes && bytes.length > 0 ? bytesToBase64(bytes) : null;
+  } catch {
+    cover = null;
+  }
+  coverCache.set(key, cover);
+  return cover;
+}
+
 /** Capture document outputs as base64 (keeping the original file name) so the
  *  HolaHub composer can upload them — the download-card path for a session. */
 export async function gatherShareFiles(
@@ -305,20 +336,8 @@ export async function gatherShareFiles(
       if (bytes.length === 0 || bytes.length > MAX_SHARE_FILE_BYTES) {
         continue;
       }
-      // Best-effort and sequential: a cover is worth a moment of the share, not
-      // a failed one, and rendering opens a window per document.
-      let coverBase64: string | undefined;
-      try {
-        const cover = await window.electronAPI.fs.buildDocumentCover(
-          path,
-          workspaceId
-        );
-        if (cover && cover.length > 0) {
-          coverBase64 = bytesToBase64(cover);
-        }
-      } catch {
-        coverBase64 = undefined;
-      }
+      // Usually already rendered — the picker asks for the same cover.
+      const coverBase64 = (await documentCoverBase64(path, workspaceId)) ?? undefined;
       files.push({
         fileName: baseName(path),
         contentType: SHARE_DOC_MIME[ext],

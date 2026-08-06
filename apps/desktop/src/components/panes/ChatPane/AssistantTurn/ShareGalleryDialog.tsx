@@ -4,6 +4,8 @@ import { Button } from "@/components/ui/button";
 import { Check, Loader2, Upload } from "@/components/ui/icons";
 import { cn } from "@/lib/utils";
 
+import { documentCoverBase64 } from "./shareCapture";
+
 /** A post holds this many artifacts, so the picker enforces it visibly rather
  *  than letting a checkbox quietly stop responding. */
 export const SHARE_GALLERY_MAX = 4;
@@ -32,6 +34,9 @@ export function ShareGalleryDialog({
 }) {
   const [thumbs, setThumbs] = useState<Thumb[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
+  // The cap only binds when there is more than it — otherwise the ceiling is
+  // simply everything on offer, and quoting 4 beside 3 items reads as a bug.
+  const selectableCount = Math.min(SHARE_GALLERY_MAX, outputs.length);
   const [loading, setLoading] = useState(false);
 
   // The gallery snapshots what it was opened on. Without this guard a caller
@@ -64,7 +69,18 @@ export function ShareGalleryDialog({
             filePath,
             workspaceId
           );
-          return { id: output.id, name, dataUrl: preview?.dataUrl ?? null };
+          if (preview?.dataUrl) {
+            return { id: output.id, name, dataUrl: preview.dataUrl };
+          }
+          // A document has no dataUrl of its own — render the cover it would be
+          // shared with, so the choice is made on the same picture the reader
+          // will get. Cached, so the share that follows doesn't render again.
+          const cover = await documentCoverBase64(filePath, workspaceId);
+          return {
+            id: output.id,
+            name,
+            dataUrl: cover ? `data:image/png;base64,${cover}` : null,
+          };
         } catch {
           return { id: output.id, name, dataUrl: null };
         }
@@ -114,8 +130,9 @@ export function ShareGalleryDialog({
             Share to HolaHub
           </DialogPrimitive.Title>
           <p className="mt-1 text-muted-foreground text-xs">
-            Pick up to {SHARE_GALLERY_MAX} of {outputs.length}. A post holds{" "}
-            {SHARE_GALLERY_MAX}.
+            {outputs.length > SHARE_GALLERY_MAX
+              ? `Pick up to ${SHARE_GALLERY_MAX} of ${outputs.length} — a post holds ${SHARE_GALLERY_MAX}.`
+              : "Pick what to share."}
           </p>
 
           <div className="-mx-1 mt-4 flex-1 overflow-y-auto px-1">
@@ -170,7 +187,7 @@ export function ShareGalleryDialog({
 
           <div className="mt-4 flex items-center justify-between gap-2">
             <span className="text-muted-foreground text-xs">
-              {selected.length} of {SHARE_GALLERY_MAX} selected
+              {selected.length} of {selectableCount} selected
             </span>
             <div className="flex items-center gap-2">
               <Button
