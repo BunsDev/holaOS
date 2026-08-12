@@ -2,6 +2,12 @@
   <img src="docs/images/banner.png" alt="holaOS" />
 </p>
 
+<p align="center">
+  <a href="https://trendshift.io/repositories/25964?utm_source=repository-badge&amp;utm_medium=badge&amp;utm_campaign=badge-repository-25964" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/repositories/25964" alt="holaboss-ai%2FholaOS | Trendshift" width="250" height="55"/></a>
+  <a href="https://trendshift.io/repositories/25964?utm_source=trendshift-badge&amp;utm_medium=badge&amp;utm_campaign=badge-trendshift-25964" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/trendshift/repositories/25964/daily?language=TypeScript" alt="holaboss-ai%2FholaOS | Trendshift" width="250" height="55"/></a>
+  <a href="https://trendshift.io/repositories/25964?utm_source=trendshift-badge&amp;utm_medium=badge&amp;utm_campaign=badge-trendshift-25964" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/trendshift/repositories/25964/daily" alt="holaboss-ai%2FholaOS | Trendshift" width="250" height="55"/></a>
+</p>
+
 <p align="center"><strong>The Computer for You and Your Agent</strong></p>
 
 <p align="center">
