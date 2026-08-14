@@ -32,6 +32,11 @@ import {
   readPiMcpToolCache,
   writePiMcpToolCache,
 } from "./pi-mcp-tool-cache.js";
+import {
+  type ActiveToolController,
+  buildMcpToolProxy,
+  type McpProxyTarget,
+} from "./mcp-tool-proxy.js";
 import { MODELS } from "../node_modules/@earendil-works/pi-ai/dist/models.generated.js";
 import {
   DEFAULT_HARNESS_MAX_EXCERPT_LINES,
@@ -223,18 +228,21 @@ export function runtimeToolSelectedModelForPiRequest(
     : `${request.provider_id}/${request.model_id}`;
 }
 
-// Models that call tools by the EXACT name we register (Claude, GPT/OpenAI,
-// Gemini). For these we must NOT register the extra `mcp__<server>__<tool>` name
-// aliases (see harnessMcpToolNameAliases): the aliases are a compat shim for
-// models like GLM that guess the Claude-Agent-SDK namespacing + keep the original
-// (kebab) tool spelling. Registering the aliases for an exact-name model DOUBLES
-// the tool list it sees for any kebab-named MCP server (e.g. AdsPower shows every
-// tool twice), which floods the model and degrades tool selection. Everything not
-// on this list keeps the aliases as a safety net.
-const MCP_EXACT_NAME_MODEL = /(?:claude|anthropic|sonnet|opus|haiku|gpt|openai|gemini|google)/i;
+// The `mcp__<server>__<tool>` name aliases (see harnessMcpToolNameAliases) are a
+// compat shim ONLY for models that mimic the Claude-Agent-SDK namespacing when
+// they emit an MCP tool call while keeping the original (kebab) tool spelling —
+// GLM / Zhipu (chatGLM) are the known offenders; without the alias their call
+// comes back "Tool not found". EVERY other model (Claude, GPT/OpenAI, Gemini,
+// DeepSeek, Qwen, Kimi, MiniMax, Doubao, …) calls MCP tools by the exact
+// registered name, so registering the aliases just DOUBLES a kebab-named server's
+// tool schemas in the list the model sees (e.g. AdsPower shows every tool twice,
+// ~4k tokens each) — pure prompt bloat that floods the model and degrades tool
+// selection. So the shim is opt-IN by model family, not a default-on safety net:
+// only namespacing models get aliases; a new offender is one line here.
+const MCP_NAMESPACING_MODEL = /(?:glm|zhipu|chatglm|z-ai|z\.ai|thudm)/i;
 
 export function mcpToolNameAliasesNeededForModel(model: string): boolean {
-  return !MCP_EXACT_NAME_MODEL.test(model);
+  return MCP_NAMESPACING_MODEL.test(model);
 }
 
 export interface PiDeps {
@@ -2955,12 +2963,36 @@ async function defaultCreateSession(request: HarnessHostPiRequest): Promise<PiSe
       createLsTool(agentCwd),
     ]),
   );
+  // MCP tool proxy: keep the (heavy) MCP tools REGISTERED but route calls through
+  // an always-active mcp_call/mcp_describe gateway with fuzzy name resolution, and
+  // deactivate them after session creation so their schemas stay OUT of the prompt
+  // (see mcp-tool-proxy.ts). Opt-in via HB_MCP_TOOL_DISCLOSURE; null = MCP tools
+  // stay fully native. On first mcp_call the proxy promotes the tool back to the
+  // active set so later turns can call it natively with its real schema.
+  const mcpProxySessionRef: { current: ActiveToolController | null } = {
+    current: null,
+  };
+  const mcpProxy = buildMcpToolProxy({
+    sessionRef: mcpProxySessionRef,
+    targets: mcpToolset.customTools.map((tool) => {
+      const meta = mcpToolset.mcpToolMetadata.get(tool.name);
+      return {
+        name: tool.name,
+        description: tool.description,
+        parameters: (tool as { parameters?: unknown }).parameters,
+        serverId: meta?.serverId,
+        toolName: meta?.toolName,
+        execute: tool.execute as McpProxyTarget["execute"],
+      };
+    }),
+  });
   const nonSkillCustomTools: ToolDefinition[] = sanitizeToolSchemas("custom", [
     ...documentReadTools,
     ...(browserTools as unknown as ToolDefinition[]),
     ...(runtimeToolsForHost as unknown as ToolDefinition[]),
     ...(composioInline.tools as unknown as ToolDefinition[]),
     ...webSearchTools,
+    ...(mcpProxy ? (mcpProxy.proxyTools as unknown as ToolDefinition[]) : []),
     // MCP tools are NOT re-gated by the request.tools enable-map. Their scope is
     // already authoritative at discovery (`discoverHarnessMcpTools` in
     // runtime/harnesses/src/mcp.ts): a server WITH allowlist refs yields only
@@ -3098,6 +3130,20 @@ async function defaultCreateSession(request: HarnessHostPiRequest): Promise<PiSe
     restorePromptCacheRetention();
     await mcpToolset.runtime?.close();
     throw error;
+  }
+
+  // The session now exists: wire the proxy to it and DEACTIVATE the gated MCP
+  // tools so only the catalog (not their schemas) rides in the prompt. All MCP
+  // tools stay in the registry so the proxy can promote one back to active on
+  // first use; setActiveToolsByName rebuilds the base system prompt from the
+  // active set and takes effect on the first agent turn.
+  if (mcpProxy) {
+    mcpProxySessionRef.current = session;
+    const activeToolNames = session
+      .getAllTools()
+      .map((tool) => tool.name)
+      .filter((name) => !mcpProxy.gatedNames.has(name));
+    session.setActiveToolsByName(activeToolNames);
   }
 
   const sessionFile = sessionManager.getSessionFile();
