@@ -34,9 +34,9 @@ import {
 } from "./pi-mcp-tool-cache.js";
 import {
   type ActiveToolController,
-  buildMcpToolProxy,
-  type McpProxyTarget,
-} from "./mcp-tool-proxy.js";
+  buildDeferredToolGateway,
+  type DeferredToolTarget,
+} from "./deferred-tool-gateway.js";
 import { MODELS } from "../node_modules/@earendil-works/pi-ai/dist/models.generated.js";
 import {
   DEFAULT_HARNESS_MAX_EXCERPT_LINES,
@@ -2963,28 +2963,50 @@ async function defaultCreateSession(request: HarnessHostPiRequest): Promise<PiSe
       createLsTool(agentCwd),
     ]),
   );
-  // MCP tool proxy: keep the (heavy) MCP tools REGISTERED but route calls through
-  // an always-active mcp_call/mcp_describe gateway with fuzzy name resolution, and
-  // deactivate them after session creation so their schemas stay OUT of the prompt
-  // (see mcp-tool-proxy.ts). Opt-in via HB_MCP_TOOL_DISCLOSURE; null = MCP tools
-  // stay fully native. On first mcp_call the proxy promotes the tool back to the
-  // active set so later turns can call it natively with its real schema.
-  const mcpProxySessionRef: { current: ActiveToolController | null } = {
+  // Deferred tool gateway: the bulky, occasionally-used tool families — Composio
+  // integrations, the browser family, and MCP servers — stay REGISTERED but are
+  // deactivated after session creation, so their schemas stay OUT of every turn's
+  // prompt. A measured desktop "hi" carried 131 tools / ~46k tokens of schemas, of
+  // which composio ~25.7k + browser ~9.6k + mcp ~1.4k were deferrable. The model
+  // reaches them via call_tool/describe_tool, and the first call to a family
+  // promotes that whole family to native for later turns (see
+  // deferred-tool-gateway.ts). HB_DEFERRED_TOOLS=0 restores fully-native tools.
+  const deferredSessionRef: { current: ActiveToolController | null } = {
     current: null,
   };
-  const mcpProxy = buildMcpToolProxy({
-    sessionRef: mcpProxySessionRef,
-    targets: mcpToolset.customTools.map((tool) => {
-      const meta = mcpToolset.mcpToolMetadata.get(tool.name);
-      return {
-        name: tool.name,
-        description: tool.description,
-        parameters: (tool as { parameters?: unknown }).parameters,
-        serverId: meta?.serverId,
-        toolName: meta?.toolName,
-        execute: tool.execute as McpProxyTarget["execute"],
-      };
-    }),
+  const asDeferredTarget = (
+    tool: { name: string; description?: string; execute: unknown },
+    group: string,
+    bareName?: string,
+  ): DeferredToolTarget => ({
+    name: tool.name,
+    group,
+    description: tool.description,
+    parameters: (tool as { parameters?: unknown }).parameters,
+    ...(bareName ? { bareName } : {}),
+    execute: tool.execute as DeferredToolTarget["execute"],
+  });
+  // The integration meta-tools (catalog / connect / default-account) are the
+  // discovery path for everything else, so they stay native and ungated.
+  const composioDeferrable = (composioInline.tools as unknown as ToolDefinition[]).filter(
+    (tool) => !tool.name.includes("workspace_integrations"),
+  );
+  const deferredGateway = buildDeferredToolGateway({
+    sessionRef: deferredSessionRef,
+    targets: [
+      ...(browserTools as unknown as ToolDefinition[]).map((tool) =>
+        asDeferredTarget(tool, "browser"),
+      ),
+      // Composio tool names are `<toolkit>_<action>` (github_create_a_commit), so
+      // the toolkit prefix is the family the model activates.
+      ...composioDeferrable.map((tool) =>
+        asDeferredTarget(tool, tool.name.split("_")[0] || "integration"),
+      ),
+      ...mcpToolset.customTools.map((tool) => {
+        const meta = mcpToolset.mcpToolMetadata.get(tool.name);
+        return asDeferredTarget(tool, meta?.serverId ?? "mcp", meta?.toolName);
+      }),
+    ],
   });
   const nonSkillCustomTools: ToolDefinition[] = sanitizeToolSchemas("custom", [
     ...documentReadTools,
@@ -2992,7 +3014,9 @@ async function defaultCreateSession(request: HarnessHostPiRequest): Promise<PiSe
     ...(runtimeToolsForHost as unknown as ToolDefinition[]),
     ...(composioInline.tools as unknown as ToolDefinition[]),
     ...webSearchTools,
-    ...(mcpProxy ? (mcpProxy.proxyTools as unknown as ToolDefinition[]) : []),
+    ...(deferredGateway
+      ? (deferredGateway.gatewayTools as unknown as ToolDefinition[])
+      : []),
     // MCP tools are NOT re-gated by the request.tools enable-map. Their scope is
     // already authoritative at discovery (`discoverHarnessMcpTools` in
     // runtime/harnesses/src/mcp.ts): a server WITH allowlist refs yields only
@@ -3132,17 +3156,17 @@ async function defaultCreateSession(request: HarnessHostPiRequest): Promise<PiSe
     throw error;
   }
 
-  // The session now exists: wire the proxy to it and DEACTIVATE the gated MCP
-  // tools so only the catalog (not their schemas) rides in the prompt. All MCP
-  // tools stay in the registry so the proxy can promote one back to active on
-  // first use; setActiveToolsByName rebuilds the base system prompt from the
+  // The session now exists: wire the gateway to it and DEACTIVATE the deferred
+  // families so only the compact catalogue (not their schemas) rides in the
+  // prompt. They stay in the registry so a family can be promoted back to active
+  // on first use; setActiveToolsByName rebuilds the base system prompt from the
   // active set and takes effect on the first agent turn.
-  if (mcpProxy) {
-    mcpProxySessionRef.current = session;
+  if (deferredGateway) {
+    deferredSessionRef.current = session;
     const activeToolNames = session
       .getAllTools()
       .map((tool) => tool.name)
-      .filter((name) => !mcpProxy.gatedNames.has(name));
+      .filter((name) => !deferredGateway.gatedNames.has(name));
     session.setActiveToolsByName(activeToolNames);
   }
 
