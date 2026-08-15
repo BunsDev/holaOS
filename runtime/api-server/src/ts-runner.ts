@@ -84,6 +84,10 @@ import {
 import type { CompiledWorkspaceRuntimePlan } from "./workspace-runtime-plan.js";
 import { buildRecalledWorkspaceMemoryContext } from "./workspace-memory.js";
 import { pendingUserMemoryContextFromProposals } from "./user-memory-proposals.js";
+import {
+  readComposioInlineCache,
+  writeComposioInlineCache,
+} from "../../harnesses/src/composio-inline-cache.js";
 import { NATIVE_WEB_SEARCH_TOOL_IDS } from "../../harnesses/src/native-web-search-tools.js";
 
 type LoggerLike = Pick<typeof console, "warn">;
@@ -936,13 +940,45 @@ interface ComposioInlineToolRefPayload {
   read_only?: boolean | null;
 }
 
+interface ComposioInlineListBody {
+  tools?: Array<{
+    name: string;
+    toolkit_slug: string;
+    tool_slug: string;
+    connected_account_id: string;
+    annotations?: { readOnlyHint?: boolean } | null;
+  }>;
+}
+
+/**
+ * Fetch the workspace's Composio inline tool listing for the capability manifest.
+ * Writes the raw body to the shared cross-turn cache so the harness-host's
+ * session setup — which hits this SAME endpoint later in the same turn — reads it
+ * instead of paying the round-trip twice (see composio-inline-cache.ts).
+ */
 async function fetchComposioInlineToolRefs(params: {
   runtimeApiBaseUrl: string | null;
   workspaceId: string;
+  workspaceDir: string;
   sessionId: string;
   inputId: string;
 }): Promise<ComposioInlineToolRefPayload[]> {
   if (!params.runtimeApiBaseUrl) return [];
+  const toRefs = (body: ComposioInlineListBody): ComposioInlineToolRefPayload[] =>
+    (body.tools ?? []).map((entry) => ({
+      name: entry.name,
+      toolkit_slug: entry.toolkit_slug,
+      tool_slug: entry.tool_slug,
+      connected_account_id: entry.connected_account_id,
+      read_only: entry.annotations?.readOnlyHint ?? null,
+    }));
+  const cached = readComposioInlineCache({
+    workspaceDir: params.workspaceDir,
+    workspaceId: params.workspaceId,
+  });
+  if (cached && typeof cached === "object") {
+    return toRefs(cached as ComposioInlineListBody);
+  }
   try {
     const url = `${params.runtimeApiBaseUrl}/api/v1/capabilities/composio-inline-tools?workspace_id=${encodeURIComponent(params.workspaceId)}`;
     const response = await fetch(url, {
@@ -955,22 +991,13 @@ async function fetchComposioInlineToolRefs(params: {
       signal: AbortSignal.timeout(5_000),
     });
     if (!response.ok) return [];
-    const payload = (await response.json()) as {
-      tools?: Array<{
-        name: string;
-        toolkit_slug: string;
-        tool_slug: string;
-        connected_account_id: string;
-        annotations?: { readOnlyHint?: boolean } | null;
-      }>;
-    };
-    return (payload.tools ?? []).map((entry) => ({
-      name: entry.name,
-      toolkit_slug: entry.toolkit_slug,
-      tool_slug: entry.tool_slug,
-      connected_account_id: entry.connected_account_id,
-      read_only: entry.annotations?.readOnlyHint ?? null,
-    }));
+    const payload = (await response.json()) as ComposioInlineListBody;
+    writeComposioInlineCache({
+      workspaceDir: params.workspaceDir,
+      workspaceId: params.workspaceId,
+      payload,
+    });
+    return toRefs(payload);
   } catch {
     return [];
   }
@@ -2336,6 +2363,7 @@ export async function executeTsRunnerRequest(
     const composioInlineToolRefsPrefetch = fetchComposioInlineToolRefs({
       runtimeApiBaseUrl: currentRuntimeApiUrl(),
       workspaceId: request.workspace_id,
+      workspaceDir: bootstrap.workspaceDir,
       sessionId: request.session_id,
       inputId: request.input_id,
     }).then((refs) => {

@@ -1,5 +1,9 @@
 import { requestCapabilityJson } from "./capability-http.js";
 import {
+  readComposioInlineCache,
+  writeComposioInlineCache,
+} from "./composio-inline-cache.js";
+import {
   resolveRuntimeToolCapabilityBaseUrl,
   runtimeToolHeaders,
 } from "./runtime-tool-capability-client.js";
@@ -45,6 +49,9 @@ export interface ResolveComposioInlineToolsOptions {
   sessionId: string | null;
   inputId: string | null;
   selectedModel: string | null;
+  /** Enables the cross-turn listing cache (see composio-inline-cache.ts). When
+   *  omitted the listing is fetched every turn, as before. */
+  workspaceDir?: string | null;
   fetchImpl?: typeof fetch;
 }
 
@@ -61,20 +68,35 @@ export async function resolveComposioInlineTools(
     inputId: options.inputId,
     selectedModel: options.selectedModel,
   });
-  let payload: InlineListPayload | null;
-  try {
-    const response = await requestCapabilityJson({
-      url: `${baseUrl}${COMPOSIO_INLINE_LIST_PATH}?workspace_id=${encodeURIComponent(options.workspaceId ?? "")}`,
-      method: "GET",
-      headers,
-      signal: AbortSignal.timeout(LIST_TIMEOUT_MS),
-      fetchImpl: options.fetchImpl,
-    });
-    payload = response.ok && isInlineListPayload(response.payload)
-      ? response.payload
+  // The api-server's bootstrap already fetched this exact listing earlier in the
+  // same turn; the shared on-disk cache lets this second read be free (see
+  // composio-inline-cache.ts for the measured cost of not doing so).
+  const cacheKey =
+    options.workspaceDir && options.workspaceId
+      ? { workspaceDir: options.workspaceDir, workspaceId: options.workspaceId }
       : null;
-  } catch {
-    payload = null;
+  let payload: InlineListPayload | null = null;
+  const cached = cacheKey ? readComposioInlineCache(cacheKey) : null;
+  if (isInlineListPayload(cached)) {
+    payload = cached;
+  } else {
+    try {
+      const response = await requestCapabilityJson({
+        url: `${baseUrl}${COMPOSIO_INLINE_LIST_PATH}?workspace_id=${encodeURIComponent(options.workspaceId ?? "")}`,
+        method: "GET",
+        headers,
+        signal: AbortSignal.timeout(LIST_TIMEOUT_MS),
+        fetchImpl: options.fetchImpl,
+      });
+      payload = response.ok && isInlineListPayload(response.payload)
+        ? response.payload
+        : null;
+    } catch {
+      payload = null;
+    }
+    if (payload && cacheKey) {
+      writeComposioInlineCache({ ...cacheKey, payload });
+    }
   }
   if (!payload) {
     return { tools: [], unavailable: [] };

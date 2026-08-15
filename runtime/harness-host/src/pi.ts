@@ -2934,6 +2934,7 @@ async function defaultCreateSession(request: HarnessHostPiRequest): Promise<PiSe
   );
   const composioInline = await timedSetup("composio_inline", () =>
     resolveComposioInlineTools({
+      workspaceDir: request.workspace_dir,
       runtimeApiBaseUrl: request.runtime_api_base_url ?? null,
       workspaceId: request.workspace_id,
       sessionId: request.session_id,
