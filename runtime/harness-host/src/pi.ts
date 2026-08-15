@@ -1487,6 +1487,45 @@ export function resolvePiSkillDirs(request: HarnessHostPiRequest): string[] {
   ]);
 }
 
+/** One line per skill: `- name — description`. Descriptions are capped so one
+ *  verbose SKILL.md cannot dominate the catalogue. */
+const PI_SKILL_CATALOG_DESCRIPTION_MAX_CHARS = 180;
+
+/**
+ * Compact replacement for pi's `<available_skills>` block.
+ *
+ * pi emits `<name>/<description>/<location>` per skill plus a preamble telling
+ * the model to `read` the skill file. Measured on a real workspace that was
+ * ~4,860 tokens for 41 skills, ~1,312 of it absolute SKILL.md paths. holaOS
+ * loads skills BY NAME via its own `skill` tool — which supplies the base dir
+ * when it renders the block — so the path is never needed, and pointing the
+ * model at `read` competes with the tool it should actually use.
+ *
+ * Returns "" when there are no model-invocable skills, so nothing is appended.
+ */
+export function renderPiSkillCatalog(
+  skills: ReadonlyArray<{ name: string; description?: string }>,
+): string {
+  const lines = skills
+    .filter((skill) => skill.name)
+    .map((skill) => {
+      const description = (skill.description ?? "")
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, PI_SKILL_CATALOG_DESCRIPTION_MAX_CHARS);
+      return description ? `- ${skill.name} — ${description}` : `- ${skill.name}`;
+    });
+  if (lines.length === 0) {
+    return "";
+  }
+  return [
+    "",
+    "",
+    "Available skills (invoke with the `skill` tool by name — do not read the files directly):",
+    ...lines,
+  ].join("\n");
+}
+
 function loadPiSkills(skillDirs: readonly string[]): LoadSkillsResult {
   return loadHarnessWorkspaceSkills<Skill, ResourceDiagnostic>({
     skillDirs,
@@ -2931,8 +2970,28 @@ async function defaultCreateSession(request: HarnessHostPiRequest): Promise<PiSe
     noSkills: true,
     noPromptTemplates: true,
     noThemes: true,
-    skillsOverride: () => loadedSkills,
-    systemPromptOverride: () => effectiveSystemPromptForRequest(request),
+    // Suppress pi's own `<available_skills>` block and emit our own compact
+    // catalogue instead (see renderPiSkillCatalog). pi's block cost ~4,860 tokens
+    // for 41 skills — over half of them the absolute `<location>` SKILL.md path
+    // of every skill, plus a preamble telling the model to `read` that file.
+    // holaOS resolves skills BY NAME through its own `skill` tool (which already
+    // states the skill's base dir when it renders the block), so the paths are
+    // dead weight and the `read` instruction actively competes with that tool.
+    //
+    // `disableModelInvocation` is what filters a skill out of pi's prompt block
+    // (skills.js) while LEAVING it in getSkills() — which matters, because pi
+    // still resolves `/skill <name>` slash-expansion through that list and reads
+    // skill.filePath from it. So the path stays on the objects, just not in the
+    // prompt.
+    skillsOverride: () => ({
+      ...loadedSkills,
+      skills: loadedSkills.skills.map((skill) => ({
+        ...skill,
+        disableModelInvocation: true,
+      })),
+    }),
+    systemPromptOverride: () =>
+      `${effectiveSystemPromptForRequest(request)}${renderPiSkillCatalog(loadedSkills.skills)}`,
   });
   await timedSetup("resource_reload", () => resourceLoader.reload());
 
