@@ -1894,9 +1894,19 @@ function writeToolOverflowFile(params: {
     fs.mkdirSync(overflowDir, { recursive: true });
     const safeTool = safeToolFilenamePart(params.toolName);
     const safeCallId = safeToolFilenamePart(params.toolCallId || `unknown-${Date.now()}`);
-    const filename = `${safeTool}-${safeCallId}.json`;
+    // Write the tool's TEXT payload verbatim when there is one, rather than the
+    // `{content:[{text}],details:{}}` envelope. A real turn lost four `bash`
+    // round-trips to python-parsing that envelope just to find where the payload
+    // lived; a plain .txt is directly usable by `read` with offset/limit.
+    const payloadText = toolResultText(params.result);
+    const filename = payloadText
+      ? `${safeTool}-${safeCallId}.txt`
+      : `${safeTool}-${safeCallId}.json`;
     const absolutePath = path.join(overflowDir, filename);
-    fs.writeFileSync(absolutePath, JSON.stringify(params.result, null, 2));
+    fs.writeFileSync(
+      absolutePath,
+      payloadText ?? JSON.stringify(params.result, null, 2),
+    );
     return {
       relativePath: path.join(TOOL_OUTPUT_OVERFLOW_DIR, filename),
       absolutePath,
@@ -1904,6 +1914,16 @@ function writeToolOverflowFile(params: {
   } catch {
     return null;
   }
+}
+
+/** Concatenated text payload of a tool result, or null when it carries none. */
+function toolResultText(result: unknown): string | null {
+  if (!isRecord(result) || !Array.isArray(result.content)) return null;
+  const parts: string[] = [];
+  for (const part of result.content) {
+    if (isRecord(part) && typeof part.text === "string") parts.push(part.text);
+  }
+  return parts.length > 0 ? parts.join("\n") : null;
 }
 
 /**
@@ -2004,9 +2024,24 @@ export function wrapToolWithOutputCap<TTool extends { name: string; execute: (..
       });
       const sizeLabel = `${(measured / 1024).toFixed(1)}KB`;
       const capLabel = `${(maxBytes / 1024).toFixed(0)}KB`;
+      // Hand back the HEAD of the payload, not just a pointer. Returning only a
+      // file path forces the agent to open the file blind and rediscover its
+      // shape — a real turn burned four `bash` calls doing exactly that before it
+      // could answer. For list-shaped results the head usually answers the
+      // question outright, and when it doesn't the agent now knows the format and
+      // can `read` with a targeted offset.
+      const preview = toolResultText(result);
+      const previewBudget = Math.max(1024, Math.min(8 * 1024, Math.floor(maxBytes / 4)));
+      const head = preview ? preview.slice(0, previewBudget) : null;
+      const headNote =
+        head && preview
+          ? `\n\n--- first ${(Buffer.byteLength(head, "utf8") / 1024).toFixed(1)}KB of ${sizeLabel} ---\n${head}\n--- end of preview ---`
+          : "";
       const text = written
-        ? `[Tool output truncated: ${sizeLabel} exceeded the ${capLabel} per-call cap. Full result saved to ${written.relativePath} — use the \`read\` tool (with offset/limit for large windows) to inspect specific sections.]`
-        : `[Tool output truncated: ${sizeLabel} exceeded the ${capLabel} per-call cap. Full result could not be persisted — adjust tool arguments (e.g. lower limits, narrower filters) and retry.]`;
+        ? `[Tool output truncated: ${sizeLabel} exceeded the ${capLabel} per-call cap. The full result is saved verbatim at ${written.relativePath} — \`read\` it (with offset/limit) only if the preview below is not enough.]${headNote}`
+        : `[Tool output truncated: ${sizeLabel} exceeded the ${capLabel} per-call cap. Full result could not be persisted — adjust tool arguments (e.g. lower limits, narrower filters) and retry.]${headNote}`;
+      // The preview DOES enter the context, so it counts against the run budget.
+      capState.inlinedBytes += Buffer.byteLength(text, "utf8");
       return {
         content: [{ type: "text", text }],
       };

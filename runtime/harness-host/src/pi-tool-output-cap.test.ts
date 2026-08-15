@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -74,6 +74,73 @@ test("wrapToolWithOutputCap without a shared accumulator applies only the per-ca
     }
   } finally {
     restoreEnv("HOLABOSS_MAX_TOOL_OUTPUT_BYTES", prevMax);
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// A real turn ("list my recent github issues") returned 57KB, blew the cap, and
+// got back nothing but a file path — so the agent spent FOUR bash calls writing
+// python to discover where in the `{content:[{text}],details:{}}` envelope the
+// payload lived before it could answer. An over-cap result must therefore still
+// carry a usable head of the payload, and the offloaded file must be the payload
+// itself rather than the envelope.
+test("an over-cap result returns a head preview of the payload, not just a pointer", async () => {
+  const prev = process.env.HOLABOSS_MAX_TOOL_OUTPUT_BYTES;
+  process.env.HOLABOSS_MAX_TOOL_OUTPUT_BYTES = String(16 * 1024);
+  const root = mkdtempSync(join(tmpdir(), "hb-tool-cap-preview-"));
+  try {
+    const payload = Array.from({ length: 4000 }, (_, i) => `issue-${i}`).join("\n");
+    const tool = {
+      name: "call_tool",
+      execute: async (..._args: unknown[]) => ({
+        content: [{ type: "text", text: payload }],
+        details: { tool_slug: "GITHUB_SEARCH_ISSUES_AND_PULL_REQUESTS" },
+      }),
+    };
+    const out = await wrapToolWithOutputCap(tool, root, createToolOutputCapState())
+      .execute("call-1", {});
+    const text = out.content[0].text as string;
+
+    assert.match(text, /Tool output truncated/, "still says it was truncated");
+    assert.match(text, /end of preview/, "carries a preview block");
+    assert.ok(text.includes("issue-0"), "preview starts at the head of the payload");
+    assert.ok(!text.includes(`issue-3999`), "preview is only the head, not everything");
+    // the whole replacement must stay comfortably under the per-call cap
+    assert.ok(
+      Buffer.byteLength(text, "utf8") < 16 * 1024,
+      `replacement (${Buffer.byteLength(text, "utf8")}B) must stay under the cap`,
+    );
+  } finally {
+    restoreEnv("HOLABOSS_MAX_TOOL_OUTPUT_BYTES", prev);
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("the offloaded file holds the payload verbatim (.txt), not the result envelope", async () => {
+  const prev = process.env.HOLABOSS_MAX_TOOL_OUTPUT_BYTES;
+  process.env.HOLABOSS_MAX_TOOL_OUTPUT_BYTES = String(4 * 1024);
+  const root = mkdtempSync(join(tmpdir(), "hb-tool-cap-file-"));
+  try {
+    const payload = "LINE-A\n" + "x".repeat(8 * 1024) + "\nLINE-Z";
+    const tool = {
+      name: "call_tool",
+      execute: async (..._args: unknown[]) => ({
+        content: [{ type: "text", text: payload }],
+        details: { noise: "envelope-only field" },
+      }),
+    };
+    const out = await wrapToolWithOutputCap(tool, root, createToolOutputCapState())
+      .execute("call-2", {});
+    const text = out.content[0].text as string;
+    const match = text.match(/saved verbatim at (\S+)/);
+    assert.ok(match, `expected a saved path in: ${text.slice(0, 160)}`);
+    const rel = match[1];
+    assert.match(rel, /\.txt$/, "text payloads are written as .txt, not .json");
+    const onDisk = readFileSync(join(root, rel), "utf8");
+    assert.equal(onDisk, payload, "file is the payload verbatim — directly readable");
+    assert.ok(!onDisk.includes("envelope-only field"), "no envelope wrapper to parse");
+  } finally {
+    restoreEnv("HOLABOSS_MAX_TOOL_OUTPUT_BYTES", prev);
     rmSync(root, { recursive: true, force: true });
   }
 });
