@@ -2987,10 +2987,17 @@ async function defaultCreateSession(request: HarnessHostPiRequest): Promise<PiSe
     ...(bareName ? { bareName } : {}),
     execute: tool.execute as DeferredToolTarget["execute"],
   });
-  // The integration meta-tools (catalog / connect / default-account) are the
-  // discovery path for everything else, so they stay native and ungated.
+  // The integration META tools stay native and ungated — they are the discovery
+  // and long-tail-execution path for everything else, and they are small (~1.5k
+  // chars total). Two families qualify: the workspace_integrations_* catalog /
+  // connect / default-account tools, and composio_search_tools /
+  // composio_execute_tool. Gating the latter cost a real turn: the model called
+  // `composio_search_tools` natively, got "Tool not found", and burned two steps
+  // rediscovering it through describe_tool.
+  const isIntegrationMetaTool = (name: string): boolean =>
+    name.includes("workspace_integrations") || name.startsWith("composio_");
   const composioDeferrable = (composioInline.tools as unknown as ToolDefinition[]).filter(
-    (tool) => !tool.name.includes("workspace_integrations"),
+    (tool) => !isIntegrationMetaTool(tool.name),
   );
   const deferredGateway = buildDeferredToolGateway({
     sessionRef: deferredSessionRef,
