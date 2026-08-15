@@ -5001,11 +5001,15 @@ test("wrapToolWithOutputCap writes oversized results to outputs/.tool-results an
     };
     assert.equal(actual.content.length, 1);
     assert.ok(actual.content[0].text.startsWith("[Tool output truncated:"));
-    assert.match(actual.content[0].text, /outputs\/\.tool-results\/gmail_fetch_emails_-call_overflow\.json/);
-    const overflowPath = path.join(workspaceDir, "outputs", ".tool-results", "gmail_fetch_emails_-call_overflow.json");
+    // A text payload is offloaded verbatim as .txt (not the result envelope) so
+    // `read` returns directly usable content, and the stub carries a head
+    // preview so the agent usually needn't open the file at all.
+    assert.match(actual.content[0].text, /outputs\/\.tool-results\/gmail_fetch_emails_-call_overflow\.txt/);
+    assert.match(actual.content[0].text, /--- first .*KB of .*KB ---/);
+    const overflowPath = path.join(workspaceDir, "outputs", ".tool-results", "gmail_fetch_emails_-call_overflow.txt");
     assert.equal(fs.existsSync(overflowPath), true);
-    const persisted = JSON.parse(fs.readFileSync(overflowPath, "utf8"));
-    assert.equal(persisted.content[0].text, largeText);
+    const persisted = fs.readFileSync(overflowPath, "utf8");
+    assert.equal(persisted, `${largeText}\ntrailing fragment`);
   } finally {
     if (previousMax === undefined) {
       delete process.env.HOLABOSS_MAX_TOOL_OUTPUT_BYTES;
