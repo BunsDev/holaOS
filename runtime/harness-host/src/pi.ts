@@ -3022,18 +3022,50 @@ async function defaultCreateSession(request: HarnessHostPiRequest): Promise<PiSe
     ...(bareName ? { bareName } : {}),
     execute: tool.execute as DeferredToolTarget["execute"],
   });
-  // The integration META tools stay native and ungated — they are the discovery
-  // and long-tail-execution path for everything else, and they are small (~1.5k
-  // chars total). Two families qualify: the workspace_integrations_* catalog /
-  // connect / default-account tools, and composio_search_tools /
-  // composio_execute_tool. Gating the latter cost a real turn: the model called
-  // `composio_search_tools` natively, got "Tool not found", and burned two steps
-  // rediscovering it through describe_tool.
+  // Administration tools: setup/repair actions that essentially never fire on a
+  // normal turn, yet cost ~4.1k tokens of schema in every single request. Gating
+  // them trades a one-call round-trip on the rare admin turn for that budget back
+  // on every other turn. Grouped so promoting one brings its siblings (an MCP
+  // repair needs connect+refresh+reauthorize together).
+  //
+  // Deliberately NOT here: workspace_integrations_list_catalog,
+  // composio_search_tools and composio_execute_tool. Those are the discovery and
+  // long-tail-execution path — gating composio_search_tools cost a real turn
+  // ("Tool not found", then two steps rediscovering it via describe_tool).
+  const DEFERRABLE_ADMIN_TOOLS: Readonly<Record<string, string>> = {
+    mcp_connect: "mcp_admin",
+    mcp_refresh: "mcp_admin",
+    mcp_reauthorize: "mcp_admin",
+    capability_install: "workspace_admin",
+    open_macos_settings: "workspace_admin",
+    update_workspace_instructions: "workspace_admin",
+    holaboss_workspace_integrations_propose_connect: "integration_setup",
+    holaboss_workspace_integrations_set_default_account: "integration_setup",
+    cronjobs: "scheduling",
+    terminal_session: "terminal",
+  };
+  const adminGroupFor = (name: string): string | null =>
+    DEFERRABLE_ADMIN_TOOLS[name] ?? null;
+  // A composio tool is deferrable unless it is one of the meta tools above; the
+  // admin map still wins for the setup-only integration tools.
   const isIntegrationMetaTool = (name: string): boolean =>
-    name.includes("workspace_integrations") || name.startsWith("composio_");
+    !adminGroupFor(name) &&
+    (name.includes("workspace_integrations") || name.startsWith("composio_"));
   const composioDeferrable = (composioInline.tools as unknown as ToolDefinition[]).filter(
     (tool) => !isIntegrationMetaTool(tool.name),
   );
+  // Admin tools live among the runtime tools (and occasionally the composio meta
+  // set); pick them up by name from wherever they were built.
+  const adminDeferrable = [
+    ...(runtimeToolsForHost as unknown as ToolDefinition[]),
+    ...(composioInline.tools as unknown as ToolDefinition[]),
+  ]
+    .filter((tool) => adminGroupFor(tool.name) !== null)
+    // Both source arrays are scanned, so dedupe by name — a duplicate target
+    // would list the tool twice in the catalogue.
+    .filter(
+      (tool, index, all) => all.findIndex((other) => other.name === tool.name) === index,
+    );
   const deferredGateway = buildDeferredToolGateway({
     sessionRef: deferredSessionRef,
     targets: [
@@ -3042,8 +3074,11 @@ async function defaultCreateSession(request: HarnessHostPiRequest): Promise<PiSe
       ),
       // Composio tool names are `<toolkit>_<action>` (github_create_a_commit), so
       // the toolkit prefix is the family the model activates.
-      ...composioDeferrable.map((tool) =>
-        asDeferredTarget(tool, tool.name.split("_")[0] || "integration"),
+      ...composioDeferrable
+        .filter((tool) => adminGroupFor(tool.name) === null)
+        .map((tool) => asDeferredTarget(tool, tool.name.split("_")[0] || "integration")),
+      ...adminDeferrable.map((tool) =>
+        asDeferredTarget(tool, adminGroupFor(tool.name) ?? "workspace_admin"),
       ),
       ...mcpToolset.customTools.map((tool) => {
         const meta = mcpToolset.mcpToolMetadata.get(tool.name);
