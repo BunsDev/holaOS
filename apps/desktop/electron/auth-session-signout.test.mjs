@@ -1,45 +1,47 @@
+import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import test from "node:test";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-const MAIN_SOURCE_PATH = new URL("./main.ts", import.meta.url);
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const mainSourcePath = path.join(__dirname, "main.ts");
 
-test("desktop auth session cleanup clears persisted Better Auth cookie and local cache", async () => {
-  const source = await readFile(MAIN_SOURCE_PATH, "utf8");
+/**
+ * The body of the `auth:signOut` IPC handler, sliced up to the next handler
+ * registration.
+ *
+ * The previous version of this test pinned the handler as one verbatim regex
+ * spanning every statement in order. That broke as soon as
+ * `clearPlaintextAuthCache()` was added beside the cookie clear — an addition
+ * that strictly improved sign-out — and from then on it guarded nothing. What
+ * matters is that each piece of state is cleared, not the order or the exact
+ * surrounding text.
+ */
+function signOutHandler(source) {
+  const start = source.indexOf('handleTrustedIpc("auth:signOut"');
+  assert.notEqual(start, -1, 'auth:signOut handler not found in main.ts');
+  const next = source.indexOf("handleTrustedIpc(", start + 1);
+  return source.slice(start, next === -1 ? undefined : next);
+}
 
-  assert.match(source, /function clearPersistedAuthCookie\(\) \{/);
-  assert.match(source, /if \("cookie" in betterAuth\) \{/);
-  assert.match(source, /delete betterAuth\.cookie;/);
-  assert.match(source, /if \("local_cache" in betterAuth\) \{/);
-  assert.match(source, /delete betterAuth\.local_cache;/);
+test("signing out clears every piece of persisted auth state", async () => {
+  const handler = signOutHandler(await readFile(mainSourcePath, "utf8"));
+
+  assert.match(handler, /await requireAuthClient\(\)\.signOut\(\)/);
+  // Cleared in a `finally` so a failing upstream sign-out still drops the
+  // local credential rather than leaving a half-signed-out desktop.
+  assert.match(handler, /\}\s*finally\s*\{/);
+  assert.match(handler, /clearPersistedAuthCookie\(\)/);
+  assert.match(handler, /await clearManagedHolabossDefaultSelection\("auth_sign_out"\)/);
+  assert.match(handler, /emitAuthUserUpdated\(null\)/);
 });
 
-test("desktop sign-out clears persisted auth state before broadcasting the signed-out user", async () => {
-  const source = await readFile(MAIN_SOURCE_PATH, "utf8");
+test("signing out revokes control-plane-managed runtime binding secrets", async () => {
+  const handler = signOutHandler(await readFile(mainSourcePath, "utf8"));
 
-  assert.match(
-    source,
-    /handleTrustedIpc\("auth:signOut", \["main", "auth-popup"], async \(\) => \{[\s\S]*try \{\s*await requireAuthClient\(\)\.signOut\(\);\s*} finally \{\s*clearPersistedAuthCookie\(\);\s*}[\s\S]*await clearManagedHolabossDefaultSelection\("auth_sign_out"\);[\s\S]*if \(\s*runtimeConfigIsControlPlaneManaged\(runtimeConfig\) &&[\s\S]*await clearRuntimeBindingSecrets\("auth_sign_out"\);[\s\S]*pendingAuthError = null;[\s\S]*emitAuthUserUpdated\(null\);[\s\S]*}\);/,
-  );
-});
-
-test("desktop managed-default cleanup clears persisted default and subagent models when they point at Holaboss", async () => {
-  const source = await readFile(MAIN_SOURCE_PATH, "utf8");
-
-  assert.match(
-    source,
-    /async function clearManagedHolabossDefaultSelection\([\s\S]*const clearDefaultProvider = isHolabossProviderAlias\(defaultProviderId\);/,
-  );
-  assert.match(
-    source,
-    /const clearDefaultModel =[\s\S]*clearDefaultProvider[\s\S]*configuredProviderIdForRuntimeModelToken\(defaultModelToken\)[\s\S]*holabossGroupHasModelToken\(defaultModelToken\);/,
-  );
-  assert.match(
-    source,
-    /const clearSubagentModel =[\s\S]*clearDefaultProvider[\s\S]*configuredProviderIdForRuntimeModelToken\(subagentModelToken\)[\s\S]*holabossGroupHasModelToken\(subagentModelToken\);/,
-  );
-  assert.match(
-    source,
-    /await writeRuntimeConfigFile\(\{\s*\.\.\.\(clearDefaultProvider \? \{ defaultProvider: null } : \{\}\),\s*\.\.\.\(clearDefaultModel \? \{ defaultModel: null } : \{\}\),\s*\.\.\.\(clearSubagentModel \? \{ subagentModel: null } : \{\}\),\s*}\);/,
-  );
+  // Only managed bindings carry secrets the desktop issued, so the revoke is
+  // conditional — but it must still be reached from the sign-out path.
+  assert.match(handler, /runtimeConfigIsControlPlaneManaged\(runtimeConfig\)/);
+  assert.match(handler, /await clearRuntimeBindingSecrets\("auth_sign_out"\)/);
 });

@@ -42,7 +42,7 @@
     "build:electron": "tsup --config tsup.config.ts --minify",
     "e2e": "npm run rebuild:native && npm run build && node --test e2e/*.test.mjs",
     "test:unit": "node --import tsx --test electron/**/*.test.ts src/**/*.test.ts",
-    "test:release": "node --test electron/app-update-config.test.mjs electron/intel-macos-release-workflow.test.mjs electron/mac-update-manifest-merge.test.mjs electron/notarize-app.test.mjs electron/release-channel-policy.test.mjs electron/runtime-bundle-validation.test.mjs electron/runtime-toolchain-split.test.mjs scripts/local-windows-output.test.mjs scripts/release-version.test.mjs scripts/runtime-bundle-state.test.mjs",
+    "test:electron": "node --test electron/*.test.mjs scripts/*.test.mjs",
     "typecheck": "tsc --noEmit",
     "preview": "vite preview",
     "dist:mac": "npm run prepare:runtime:local:macos && npm run prepare:packaged-config && npm run build && node scripts/run-electron-builder.mjs --mac dir --arm64 --config.mac.identity=-",

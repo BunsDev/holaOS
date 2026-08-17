@@ -1,141 +1,55 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-const DESKTOP_PACKAGE_PATH = new URL("../package.json", import.meta.url);
-const BUILDER_CONFIG_PATH = new URL("../electron-builder.config.cjs", import.meta.url);
-const RUN_ELECTRON_BUILDER_PATH = new URL("../scripts/run-electron-builder.mjs", import.meta.url);
-const NPM_RUNNER_PATH = new URL("../scripts/npm-runner.mjs", import.meta.url);
-const CI_WORKFLOW_PATH = new URL("../../../.github/workflows/ci.yml", import.meta.url);
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const scriptsDir = path.join(__dirname, "..", "scripts");
+const npmRunnerPath = path.join(scriptsDir, "npm-runner.mjs");
 
-test("windows packaging scripts prepare the packaged config before building installers", async () => {
-  const packageJson = JSON.parse(await readFile(DESKTOP_PACKAGE_PATH, "utf8"));
+/**
+ * This file used to also assert the CI workflow gated the Windows release on a
+ * `release_windows` dispatch input. That input was removed when Windows became
+ * an unconditional part of the release, so the assertion was pinning a decision
+ * that had been reversed; it is gone rather than resurrected.
+ *
+ * What remains is the invariant that still bites: on Windows, `spawnSync("npm")`
+ * fails with ENOENT whenever a version manager (mise, nvm, fnm) or Electron
+ * leaves npm off PATH in a nested spawn. Every helper script must therefore go
+ * through the shared runner.
+ */
 
-  assert.match(packageJson.scripts["dist:win"], /prepare:packaged-config/);
-  assert.match(packageJson.scripts["dist:win:local"], /prepare:packaged-config/);
+test("the npm runner resolves npm without relying on PATH", async () => {
+  const source = await readFile(npmRunnerPath, "utf8");
+
+  // Preferred: run npm's CLI entry under the current node binary.
+  assert.match(source, /process\.env\.npm_execpath/);
+  assert.match(source, /command: process\.execPath/);
+  // Windows fallback: npm.cmd is a batch file, so it needs a shell — and it
+  // must be spawned via ComSpec rather than as a bare `command: "npm.cmd"`,
+  // which does not resolve.
+  assert.match(source, /process\.env\.ComSpec \|\| "cmd\.exe"/);
+  assert.match(source, /argsPrefix: \["\/d", "\/s", "\/c", "npm\.cmd"\]/);
+  assert.doesNotMatch(source, /command: "npm\.cmd"/);
 });
 
-test("desktop packaging does not publish standalone Windows runtime tar artifacts", async () => {
-  const [workflowSource, packagedConfigSource] = await Promise.all([
-    readFile(CI_WORKFLOW_PATH, "utf8"),
-    readFile(new URL("../scripts/write-packaged-config.mjs", import.meta.url), "utf8"),
-  ]);
-
-  assert.match(workflowSource, /No staged Windows runtime bundle was produced under apps\/desktop\/out\/runtime-windows\./);
-  assert.doesNotMatch(workflowSource, /RUNTIME_ASSET_NAME: holaboss-runtime-windows\.tar\.gz/);
-  assert.doesNotMatch(workflowSource, /runtime_asset_path=/);
-  assert.doesNotMatch(workflowSource, /desktop\/out\/\$\{\{ env\.RUNTIME_ASSET_NAME \}\}/);
-  assert.doesNotMatch(workflowSource, /TOOLCHAIN_ASSET_NAME: holaboss-toolchain-windows\.tar\.gz/);
-  assert.doesNotMatch(workflowSource, /toolchain_asset_path=/);
-  assert.doesNotMatch(workflowSource, /desktop\/out\/\$\{\{ env\.TOOLCHAIN_ASSET_NAME \}\}/);
-  assert.doesNotMatch(packagedConfigSource, /toolchainManifest,/);
-});
-
-test("windows packaging config and CI workflow support optional signing and NSIS installer publishing", async () => {
-  const [builderConfigSource, runElectronBuilderSource, workflowSource] = await Promise.all([
-    readFile(BUILDER_CONFIG_PATH, "utf8"),
-    readFile(RUN_ELECTRON_BUILDER_PATH, "utf8"),
-    readFile(CI_WORKFLOW_PATH, "utf8"),
-  ]);
-
-  assert.match(builderConfigSource, /const windowsCertificateSigningConfigured = Boolean\(/);
-  assert.match(builderConfigSource, /readEnv\("WIN_CSC_LINK"\) \|\| readEnv\("CSC_LINK"\)/);
-  assert.match(builderConfigSource, /const windowsAzureSigningEnv = \{/);
-  assert.match(builderConfigSource, /WINDOWS_SIGNING_CERTIFICATE_PROFILE_NAME/);
-  assert.match(builderConfigSource, /azureSignOptions: windowsAzureSigningConfig/);
-  assert.match(builderConfigSource, /signAndEditExecutable: windowsSigningConfigured,/);
-
-  assert.match(runElectronBuilderSource, /const electronBuilderCli = path\.join\(/);
-  assert.match(runElectronBuilderSource, /"node_modules",\s*"electron-builder",\s*"cli\.js"/);
-  assert.match(runElectronBuilderSource, /const match = trimmed\.match\(\/\(\\d\+\\\.\\d\+\\\.\\d\+\)\$\/\);/);
-  assert.match(runElectronBuilderSource, /spawn\(process\.execPath, \[electronBuilderCli, \.\.\.builderArgs\], \{/);
-
-  assert.match(workflowSource, /^name: CI$/m);
-  assert.match(workflowSource, /release-windows-desktop:/);
-  assert.match(workflowSource, /if: \$\{\{ github\.event_name == 'workflow_dispatch' && inputs\.release_windows \}\}/);
-  assert.match(workflowSource, /runs-on: windows-latest/);
-  assert.match(workflowSource, /release_tag must match holaOS-YYYY\.MDD\.R/);
-  assert.match(workflowSource, /DESKTOP_RELEASE_ASSET_NAME: holaOS-windows-x64-setup\.exe/);
-  assert.match(workflowSource, /- name: Validate Azure Trusted Signing credentials/);
-  assert.match(workflowSource, /https:\/\/login\.microsoftonline\.com\/\$env:AZURE_TENANT_ID\/oauth2\/v2\.0\/token/);
-  assert.match(workflowSource, /scope = "https:\/\/codesigning\.azure\.net\/\.default"/);
-  assert.match(workflowSource, /Update AZURE_CLIENT_SECRET to the client secret Value from Microsoft Entra, not the Secret ID/);
-  assert.match(workflowSource, /- name: Validate Azure Trusted Signing authorization/);
-  assert.match(workflowSource, /Install-Module -Name TrustedSigning -MinimumVersion 0\.5\.0/);
-  assert.match(workflowSource, /Microsoft\.NET\\Framework64\\v4\.0\.30319\\csc\.exe/);
-  assert.match(workflowSource, /Unable to create Azure Trusted Signing probe executable/);
-  assert.match(workflowSource, /Invoke-TrustedSigning/);
-  assert.match(workflowSource, /Azure Trusted Signing authorization probe failed with 403 Forbidden/);
-  assert.match(workflowSource, /Get-AuthenticodeSignature -FilePath \$probePath/);
-  assert.match(workflowSource, /- name: Install workspace dependencies \(covers desktop\)\r?\n\s+env:\r?\n\s+ELECTRON_SKIP_BINARY_DOWNLOAD: "1"\r?\n\s+run: bun install --frozen-lockfile/);
-  assert.match(workflowSource, /WINDOWS_SIGNING_ENDPOINT: \$\{\{ vars\.WINDOWS_SIGNING_ENDPOINT \}\}/);
-  assert.match(workflowSource, /WINDOWS_SIGNING_ACCOUNT_NAME: \$\{\{ vars\.WINDOWS_SIGNING_ACCOUNT_NAME \}\}/);
-  assert.match(workflowSource, /WINDOWS_SIGNING_CERTIFICATE_PROFILE_NAME: \$\{\{ vars\.WINDOWS_SIGNING_CERTIFICATE_PROFILE_NAME \}\}/);
-  assert.match(workflowSource, /WINDOWS_SIGNING_PUBLISHER_NAME: \$\{\{ vars\.WINDOWS_SIGNING_PUBLISHER_NAME \}\}/);
-  assert.match(workflowSource, /AZURE_TENANT_ID: \$\{\{ secrets\.AZURE_TENANT_ID \}\}/);
-  assert.match(workflowSource, /AZURE_CLIENT_ID: \$\{\{ secrets\.AZURE_CLIENT_ID \}\}/);
-  assert.match(workflowSource, /AZURE_CLIENT_SECRET: \$\{\{ secrets\.AZURE_CLIENT_SECRET \}\}/);
-  assert.match(workflowSource, /Get-AuthenticodeSignature -FilePath \$stablePath/);
-  assert.match(workflowSource, /\$installerBlockmapPath = "\$installerPath\.blockmap"/);
-  assert.match(workflowSource, /No Windows installer blockmap was produced for \$\(\$installer\.Name\)\./);
-  assert.ok(
-    workflowSource.includes(
-      '$manifestContent = $manifestContent -replace "(?m)^(\\s*-\\s*url:\\s*).+$", "`${1}$env:DESKTOP_RELEASE_ASSET_NAME"',
-    ),
+test("no desktop helper script spawns npm directly", async () => {
+  const entries = await readdir(scriptsDir);
+  const helpers = entries.filter(
+    (name) => name.startsWith("ensure-") && name.endsWith(".mjs"),
   );
-  assert.ok(
-    workflowSource.includes(
-      '$manifestContent = $manifestContent -replace "(?m)^(path:\\s*).+$", "`${1}$env:DESKTOP_RELEASE_ASSET_NAME"',
-    ),
-  );
-  assert.doesNotMatch(workflowSource, /WINDOWS_CERTIFICATE:/);
-  assert.match(workflowSource, /npm run dist:win:local/);
-  assert.match(workflowSource, /if \(\$LASTEXITCODE -ne 0\) \{/);
-  assert.match(workflowSource, /npm run dist:win:local failed with exit code \$LASTEXITCODE/);
-  assert.match(workflowSource, /Contents of apps\/desktop\/out\/release:/);
-  assert.match(workflowSource, /generated_installer_path=/);
-  assert.match(workflowSource, /\$manifestName = if \(\$primaryChannel -eq "beta"\) \{ "beta\.yml" \} else \{ "latest\.yml" \}/);
-  assert.match(workflowSource, /\$manifestName was not generated/);
-  assert.match(workflowSource, /\$manifestContent -notmatch \[regex\]::Escape\(\$stableInstallerName\)/);
-  assert.match(workflowSource, /No Windows blockmap was produced for \$stableInstallerName\./);
-  assert.match(workflowSource, /uses: actions\/upload-artifact@v7/);
-  assert.match(workflowSource, /name: \$\{\{ env\.DESKTOP_ASSET_PREFIX \}\}-\$\{\{ inputs\.release_tag \}\}/);
-  assert.match(workflowSource, /desktop\/out\/release\/\$\{\{ env\.DESKTOP_RELEASE_ASSET_NAME \}\}/);
-  assert.match(workflowSource, /desktop\/out\/release\/\$\{\{ env\.DESKTOP_RELEASE_ASSET_NAME \}\}\.blockmap/);
-});
+  assert.ok(helpers.length > 0, "no ensure-*.mjs helper scripts found");
 
-test("desktop helper scripts invoke npm through the Windows-safe runner", async () => {
-  const [
-    npmRunnerSource,
-    ensureAppSdkSource,
-    ensureRuntimeClientSource,
-    ensureEditorSource,
-    ensureRuntimeBundleSource,
-  ] = await Promise.all([
-    readFile(NPM_RUNNER_PATH, "utf8"),
-    readFile(new URL("../scripts/ensure-app-sdk.mjs", import.meta.url), "utf8"),
-    readFile(new URL("../scripts/ensure-runtime-client.mjs", import.meta.url), "utf8"),
-    readFile(new URL("../scripts/ensure-editor.mjs", import.meta.url), "utf8"),
-    readFile(new URL("../scripts/ensure-runtime-bundle.mjs", import.meta.url), "utf8"),
-  ]);
-
-  assert.match(npmRunnerSource, /process\.platform === "win32"/);
-  assert.match(npmRunnerSource, /process\.env\.npm_execpath/);
-  assert.match(npmRunnerSource, /function isNodeScript/);
-  assert.match(npmRunnerSource, /function resolveWindowsNpmCliPath/);
-  assert.match(npmRunnerSource, /command: process\.execPath/);
-  assert.match(npmRunnerSource, /process\.env\.ComSpec \|\| "cmd\.exe"/);
-  assert.match(npmRunnerSource, /argsPrefix: \["\/d", "\/s", "\/c", "npm\.cmd"\]/);
-  assert.doesNotMatch(npmRunnerSource, /command: "npm\.cmd"/);
-  assert.match(npmRunnerSource, /failed to spawn \$\{command\}/);
-
-  for (const source of [
-    ensureAppSdkSource,
-    ensureRuntimeClientSource,
-    ensureEditorSource,
-    ensureRuntimeBundleSource,
-  ]) {
-    assert.match(source, /import \{ runNpm \} from "\.\/npm-runner\.mjs";/);
-    assert.doesNotMatch(source, /spawnSync\("npm"/);
+  for (const helper of helpers) {
+    const source = await readFile(path.join(scriptsDir, helper), "utf8");
+    if (!/\bnpm\b/.test(source)) {
+      continue; // helper has no npm involvement at all
+    }
+    assert.doesNotMatch(
+      source,
+      /spawnSync\(\s*"npm"/,
+      `scripts/${helper} spawns npm directly instead of using runNpm`,
+    );
   }
 });

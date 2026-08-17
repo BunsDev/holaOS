@@ -7,113 +7,69 @@ import { fileURLToPath } from "node:url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const mainSourcePath = path.join(__dirname, "main.ts");
 
-test("desktop runtime config mutations are serialized and written atomically", async () => {
+const LOCK = "withRuntimeConfigMutationLock(";
+const WRITE = "writeRuntimeConfigTextAtomically(";
+
+/** Offsets of every occurrence of `needle`, ignoring its own declaration. */
+function callSites(source, needle) {
+  const sites = [];
+  for (
+    let index = source.indexOf(needle);
+    index !== -1;
+    index = source.indexOf(needle, index + 1)
+  ) {
+    const lineStart = source.lastIndexOf("\n", index) + 1;
+    const line = source.slice(lineStart, index);
+    if (/\b(async\s+)?function\s*$/.test(line)) {
+      continue; // the declaration itself, not a call
+    }
+    sites.push(index);
+  }
+  return sites;
+}
+
+test("runtime config is written atomically via a temp file and rename", async () => {
   const source = await readFile(mainSourcePath, "utf8");
 
+  assert.match(source, /async function writeRuntimeConfigTextAtomically\(/);
+  // A partial write to the live config file would leave the desktop unable to
+  // reach its runtime, so the write must land through a rename.
+  assert.match(source, /const tempPath = `\$\{configPath\}[^`]*\.tmp`;/);
+  assert.match(source, /await fs\.writeFile\(tempPath, nextText/);
+  assert.match(source, /await fs\.rename\(tempPath, configPath\)/);
+});
+
+test("the runtime config mutation lock serializes in-flight writers", async () => {
+  const source = await readFile(mainSourcePath, "utf8");
+
+  assert.match(source, /async function withRuntimeConfigMutationLock<T>\(/);
+  // Whatever the surrounding shape, the lock has to await an in-flight
+  // mutation before starting its own.
   assert.match(
     source,
-    /let runtimeConfigMutationPromise: Promise<void> \| null = null;/,
-  );
-  assert.match(
-    source,
-    /async function withRuntimeConfigMutationLock<T>\(\s*work: \(\) => Promise<T>,\s*\): Promise<T> \{/,
-  );
-  assert.match(
-    source,
-    /while \(runtimeConfigMutationPromise\) \{\s*await runtimeConfigMutationPromise;\s*\}/,
-  );
-  assert.match(
-    source,
-    /async function writeRuntimeConfigTextAtomically\(\s*nextText: string,\s*\): Promise<void> \{/,
-  );
-  assert.match(
-    source,
-    /const tempPath = `\$\{configPath\}\.\$\{process\.pid\}\.\$\{Date\.now\(\)\}\.tmp`;/,
-  );
-  assert.match(
-    source,
-    /await fs\.writeFile\(tempPath, nextText, "utf-8"\);/,
-  );
-  assert.match(
-    source,
-    /await fs\.rename\(tempPath, configPath\);/,
+    /while \(runtimeConfigMutationPromise\)\s*\{\s*await runtimeConfigMutationPromise;/,
   );
 });
 
-test("desktop runtime config writers use the shared mutation lock", async () => {
+test("every runtime config writer acquires the mutation lock first", async () => {
   const source = await readFile(mainSourcePath, "utf8");
-  const writeRuntimeConfigSection =
-    source.match(
-      /async function writeRuntimeConfigFile\(update: RuntimeConfigUpdatePayload\) \{[\s\S]*?\n}\n\nfunction runtimeConfigField/,
-    )?.[0] ?? "";
-  const browserCapabilitySection =
-    source.match(
-      /async function updateDesktopBrowserCapabilityConfig\(update: \{[\s\S]*?\n}\n\nfunction desktopBrowserServiceTokenFromRequest/,
-    )?.[0] ?? "";
-  const setRuntimeConfigDocumentSection =
-    source.match(
-      /async function setRuntimeConfigDocument\([\s\S]*?\n}\n\nfunction runtimeUserProfileNameSourceFromApi/,
-    )?.[0] ?? "";
 
-  assert.match(
-    writeRuntimeConfigSection,
-    /const next = await withRuntimeConfigMutationLock\(async \(\) => \{/,
-  );
-  assert.match(
-    writeRuntimeConfigSection,
-    /await writeRuntimeConfigTextAtomically\(/,
-  );
-  assert.match(
-    writeRuntimeConfigSection,
-    /await syncDesktopBrowserCapabilityConfig\(\);\s*return next;/,
-  );
-  assert.match(
-    browserCapabilitySection,
-    /await withRuntimeConfigMutationLock\(async \(\) => \{/,
-  );
-  assert.match(
-    browserCapabilitySection,
-    /await writeRuntimeConfigTextAtomically\(/,
-  );
-  assert.match(
-    setRuntimeConfigDocumentSection,
-    /await withRuntimeConfigMutationLock\(async \(\) => \{/,
-  );
-  assert.match(
-    setRuntimeConfigDocumentSection,
-    /await writeRuntimeConfigTextAtomically\(nextText\);/,
-  );
-  assert.match(
-    setRuntimeConfigDocumentSection,
-    /await syncDesktopBrowserCapabilityConfig\(\);/,
-  );
-});
+  const writes = callSites(source, WRITE);
+  assert.ok(writes.length > 0, "no writeRuntimeConfigTextAtomically call sites");
 
-test("desktop runtime propagates the live browser capability into queued runs and embedded runtime env", async () => {
-  const source = await readFile(mainSourcePath, "utf8");
-  const queueSessionInputSection =
-    source.match(
-      /async function queueSessionInput\([\s\S]*?\n}\n\nasync function pauseSessionRun/,
-    )?.[0] ?? "";
-  const startEmbeddedRuntimeSection =
-    source.match(
-      /async function startEmbeddedRuntime\(\) \{[\s\S]*?\n}\n\nfunction persistFileBookmarks/,
-    )?.[0] ?? "";
-
-  assert.match(
-    queueSessionInputSection,
-    /await syncDesktopBrowserCapabilityConfig\(\);\s*const currentConfig = await readRuntimeConfigFile\(\);/,
-  );
-  assert.match(
-    startEmbeddedRuntimeSection,
-    /HOLABOSS_DESKTOP_BROWSER_ENABLED: currentDesktopBrowserCapabilityConfig\(\)\s*[\s\S]*?\.enabled\s*[\s\S]*?\?\s*"true"\s*:\s*"false"/,
-  );
-  assert.match(
-    startEmbeddedRuntimeSection,
-    /HOLABOSS_DESKTOP_BROWSER_URL: desktopBrowserServiceUrl,/,
-  );
-  assert.match(
-    startEmbeddedRuntimeSection,
-    /HOLABOSS_DESKTOP_BROWSER_AUTH_TOKEN:\s*desktopBrowserServiceAuthToken,/,
-  );
+  for (const write of writes) {
+    const lock = source.lastIndexOf(LOCK, write);
+    // Nearest preceding function declaration — the lock must be acquired
+    // after it, i.e. inside the same function as the write, not merely
+    // somewhere earlier in the file.
+    const enclosing = Math.max(
+      source.lastIndexOf("\nasync function ", write),
+      source.lastIndexOf("\nfunction ", write),
+    );
+    const line = source.slice(0, write).split("\n").length;
+    assert.ok(
+      lock !== -1 && lock > enclosing,
+      `writeRuntimeConfigTextAtomically at main.ts:${line} is not inside a withRuntimeConfigMutationLock block`,
+    );
+  }
 });

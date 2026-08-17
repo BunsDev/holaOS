@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
 const WORKSPACES_METHODS_PATH = new URL(
-  "../../packages/runtime-client/src/methods/workspaces.ts",
+  "../../../packages/runtime-client/src/methods/workspaces.ts",
   import.meta.url,
 );
 

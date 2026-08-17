@@ -82,12 +82,13 @@ jobs:
       # apps/desktop's node:test files were never executed by any CI job, so
       # the invariants they encode drifted silently — that is how the DMG
       # undersize bug reached a release twice (holaOS-2026.608.2 and again on
-      # holaOS-2026.815.1). These read workflow/config sources only, so they
-      # need no build. Scoped to the release-packaging guards; the remaining
-      # electron/*.test.mjs files are still drifted and are not gated yet.
-      - name: Desktop release-packaging guards
+      # holaOS-2026.815.1). They read source and config files only, so they
+      # need no build and cost about a second. The 20 that had rotted into
+      # pinning formatting rather than behavior are gone, so this now gates
+      # the whole suite rather than a hand-listed subset.
+      - name: Desktop guard tests
         working-directory: apps/desktop
-        run: bun run test:release
+        run: bun run test:electron
 
   runtime-tests:
     if: ${{ github.event_name != 'workflow_dispatch' }}
