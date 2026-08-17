@@ -192,14 +192,18 @@ test("manual CI workflow publishes desktop installers without standalone runtime
   assert.match(source, /merged macOS updater manifest is missing an Intel ZIP/);
   assert.match(source, /SOURCE_GH_REPO: \$\{\{ github\.repository \}\}/);
   assert.match(source, /RELEASE_GH_REPO: holaboss-ai\/holaOS-releases/);
-  assert.match(source, /SOURCE_GH_TOKEN: \$\{\{ github\.token \}\}/);
-  assert.match(source, /GH_TOKEN="\$\{SOURCE_GH_TOKEN\}" gh api "repos\/\$\{SOURCE_GH_REPO\}\/releases\/generate-notes"/);
-  assert.match(source, /sed -i\.bak \\/);
-  assert.match(source, /-e '\/\^\\\*\\\*Full Changelog\\\*\\\*:\/d' \\/);
-  assert.match(source, /-e '\/\^Full Changelog:\/d' \\/);
-  assert.match(source, /rm -f "\$\{notes_path\}\.bak"/);
-  assert.match(source, /tag_name=\$\{RELEASE_TAG\}/);
-  assert.match(source, /target_commitish=\$\{RELEASE_SHA\}/);
+  // The release body is deliberately empty — the generate-notes API call and
+  // the sed pass that scrubbed its "Full Changelog" footer were both removed,
+  // so the release page carries only the title and the downloadable assets.
+  assert.match(source, /Release body is intentionally empty/);
+  assert.match(source, /: > "\$\{notes_path\}"/);
+  assert.doesNotMatch(source, /SOURCE_GH_TOKEN/);
+  assert.doesNotMatch(source, /releases\/generate-notes/);
+  assert.doesNotMatch(source, /Full Changelog/);
+  assert.match(
+    source,
+    /gh release create "\$\{RELEASE_TAG\}" \\\n\s+--repo "\$\{RELEASE_GH_REPO\}" \\\n\s+--title "\$\{RELEASE_TITLE\}" \\\n\s+--notes-file "\$\{notes_path\}" \\/,
+  );
   assert.match(source, /mac_dmg_asset="release-assets\/macos-desktop\/holaOS-macos-arm64\.dmg"/);
   assert.match(source, /mac_zip_asset="\$\(find release-assets\/macos-desktop -maxdepth 1 -name '\*\.zip' ! -name '\*\.blockmap' -print -quit\)"/);
   assert.match(source, /mac_zip_blockmap_asset="\$\{mac_zip_asset\}\.blockmap"/);
@@ -249,7 +253,7 @@ test("manual CI workflow publishes desktop installers without standalone runtime
   assert.match(builderConfig, /scripts", "write-app-update-config\.mjs"/);
   assert.match(builderConfig, /await writeAppUpdateConfig\(appBundlePath\);/);
   assert.match(source, /Desktop typecheck/);
-  assert.match(source, /Runtime harness host tests/);
+  assert.match(source, /Runtime state store \+ harness host/);
 });
 
 test("mac release helper runs zip + dmg in separate electron-builder passes and merges their manifests", async () => {
