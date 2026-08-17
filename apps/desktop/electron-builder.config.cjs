@@ -218,7 +218,21 @@ module.exports = {
     ...(macIdentity ? { identity: macIdentity } : {})
   },
   dmg: {
-    artifactName: "holaOS-macos-${arch}.dmg"
+    artifactName: "holaOS-macos-${arch}.dmg",
+    // electron-builder delegates DMG packing to a vendored Python `dmgbuild`,
+    // which sizes the image itself: 128MB base + sum(roundup(fileSize, 4096)),
+    // then `str(total / 1000) + "K"` — bytes divided by 1000 but labelled K
+    // (=1024), i.e. ~2.4% headroom. HFS+ metadata (catalog/extents B-trees,
+    // journal, xattrs that lstat never counted) eats that, and the copy is
+    // `subprocess.call(["/usr/bin/ditto", ...])` with the exit code DISCARDED
+    // — so an ENOSPC mid-copy silently yields a DMG missing files while
+    // electron-builder still reports success. That shipped holaOS-2026.608.2
+    // and blocked holaOS-2026.815.1, both times dropping the ~200MB
+    // `Electron Framework` binary (Intel first: the x64 payload runs ~15%
+    // larger than arm64, so it crosses the line first).
+    // `shrink` defaults to true and dmgbuild resizes to minimum after copying,
+    // so the oversize costs nothing in the published artifact.
+    size: "4g"
   },
   ...(appUpdatesEnabled
     ? {

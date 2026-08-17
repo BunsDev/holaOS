@@ -279,6 +279,20 @@ test("mac release helper runs zip + dmg in separate electron-builder passes and 
   );
 });
 
+test("dmg target pins an explicit image size so dmgbuild can't undersize it", async () => {
+  const builderConfig = await readFile(electronBuilderConfigPath, "utf8");
+
+  // dmgbuild sizes the image at ~2.4% over the summed file sizes and then
+  // copies with `subprocess.call(['/usr/bin/ditto', ...])`, throwing away the
+  // exit code — so it emits a DMG that's silently missing files (the ~200MB
+  // Electron Framework binary first) and still exits 0. Only an explicit size
+  // avoids that; without it holaOS-2026.815.1 could not be released.
+  assert.match(builderConfig, /dmg: \{[\s\S]*?\bsize: "\dg"/);
+  // shrink must stay at its `true` default so the published DMG is still
+  // resized down to the minimum after the copy.
+  assert.doesNotMatch(builderConfig, /shrink:\s*false/);
+});
+
 test("docs workflow remains independent and CI ignores docs-only changes", async () => {
   const ciSource = await readFile(ciWorkflowPath, "utf8");
 
