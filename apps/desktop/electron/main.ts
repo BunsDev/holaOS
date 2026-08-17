@@ -26654,6 +26654,30 @@ app.on("web-contents-created", (_event, contents) => {
 // Independent ready step: the agent browser capability must come up regardless
 // of anything else in the long ready sequence below (it's what exposes browser_*
 // tools to agents), so an unrelated earlier failure can't leave it disabled.
+/**
+ * Run one boot step, keeping a failure from aborting the rest of
+ * `app.whenReady()`.
+ *
+ * Failures are recorded rather than swallowed: runtime.log is what the
+ * diagnostics bundle collects, so a degraded launch stays diagnosable after
+ * the fact instead of looking like a healthy one.
+ */
+async function runBootStep(
+  label: string,
+  run: () => Promise<unknown> | unknown,
+): Promise<void> {
+  try {
+    await run();
+  } catch (error) {
+    const detail = error instanceof Error ? (error.stack ?? error.message) : String(error);
+    // eslint-disable-next-line no-console
+    console.error(`[boot] ${label} failed`, error);
+    void appendRuntimeLog(`[boot] ${label} failed: ${detail}`).catch(
+      () => undefined,
+    );
+  }
+}
+
 app.whenReady().then(() => {
   void ensureDesktopBrowserServiceStarted();
 });
@@ -26677,11 +26701,21 @@ app.whenReady().then(async () => {
   installWindowsApplicationMenu();
   applyMainShellContentSecurityPolicy(session.defaultSession);
 
-  await loadBrowserPersistence();
-  await loadBrowserProfiles();
-  await loadFingerprintTemplates();
-  await bootstrapRuntimeDatabase();
-  bootstrapControlPlaneDatabase();
+  // Each of these loads persisted state from disk, and each can throw on
+  // ordinary field conditions: a read-only or full userData dir, a corrupt or
+  // locked SQLite file (bootstrapRuntimeDatabase is try/finally with no catch).
+  // None is a prerequisite for showing a window.
+  //
+  // Unguarded, any one of them aborted the remaining ~2,600 lines of this
+  // chain: all 249 IPC handler registrations, createMainWindow(), and the
+  // app.on("activate") registration at the very end -- so the user got a dock
+  // icon, no window, and clicking the dock did nothing. Degrading one
+  // subsystem is recoverable; losing the window is not.
+  await runBootStep("browser persistence", loadBrowserPersistence);
+  await runBootStep("browser profiles", loadBrowserProfiles);
+  await runBootStep("fingerprint templates", loadFingerprintTemplates);
+  await runBootStep("runtime database", bootstrapRuntimeDatabase);
+  await runBootStep("control-plane database", bootstrapControlPlaneDatabase);
   probeAuthCookieHealthOnce();
   setupDevRuntimeHotReload();
 
@@ -29327,7 +29361,28 @@ app.whenReady().then(async () => {
       createMainWindow();
     }
   });
-});
+})
+  .catch((error) => {
+    // Anything still escaping the chain is unexpected and leaves the app with
+    // no window and no explanation. Registering process-level handlers
+    // suppresses Electron's own error dialog, so without this the failure is
+    // completely silent: a dock icon that does nothing.
+    const detail =
+      error instanceof Error ? (error.stack ?? error.message) : String(error);
+    // eslint-disable-next-line no-console
+    console.error("[boot] app.whenReady failed", error);
+    void appendRuntimeLog(`[boot] app.whenReady failed: ${detail}`).catch(
+      () => undefined,
+    );
+    try {
+      dialog.showErrorBox(
+        "holaOS couldn't finish starting",
+        `${detail}\n\nThe log is in runtime.log; Help → Export diagnostics collects it.`,
+      );
+    } catch {
+      // A dialog this early can itself fail; the log above is the fallback.
+    }
+  });
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") {
