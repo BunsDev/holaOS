@@ -18,6 +18,12 @@ const mergeScriptPath = path.join(
   "merge-mac-update-manifests.rb",
 );
 
+// Note the `releaseDate` below round-trips through YAML.stringify UNQUOTED,
+// unlike electron-builder's own output which quotes it. Keep it that way: an
+// unquoted timestamp is what Psych 4 (Ruby 3.1+) parses as a Time and then
+// rejects under its safe-load default, so this fixture is what covers the
+// permitted_classes fallback in merge-mac-update-manifests.rb. Quoting it here
+// would make the test pass on any Ruby and stop guarding anything.
 test("merge-mac-update-manifests preserves the primary manifest and appends Intel mac files", async () => {
   const tempRoot = await mkdtemp(path.join(os.tmpdir(), "holaboss-mac-manifest-"));
   const primaryManifestPath = path.join(tempRoot, "latest-mac.yml");

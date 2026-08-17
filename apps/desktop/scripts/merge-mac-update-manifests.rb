@@ -1,5 +1,6 @@
 #!/usr/bin/env ruby
 
+require "date"
 require "fileutils"
 require "yaml"
 
@@ -9,7 +10,19 @@ def usage!
 end
 
 def load_manifest(path)
-  data = YAML.load_file(path)
+  # Psych 4 (Ruby 3.1+) made load_file safe-load by default, which raises
+  # Psych::DisallowedClass on the Time that an unquoted `releaseDate:` parses
+  # to. electron-builder quotes it, so real manifests load either way — but a
+  # hand-written or third-party one need not, and this runs on both ubuntu
+  # (Ruby 3.2) and the macOS release runners. Psych 3.x, including macOS system
+  # Ruby 2.6, takes no keyword args here at all and is already permissive, so
+  # feature-detect rather than branch on a version.
+  data =
+    begin
+      YAML.load_file(path, permitted_classes: [Date, DateTime, Time], aliases: true)
+    rescue ArgumentError
+      YAML.load_file(path)
+    end
   unless data.is_a?(Hash)
     raise "expected #{path} to contain a YAML object"
   end
