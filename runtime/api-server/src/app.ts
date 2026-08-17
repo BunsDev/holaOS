@@ -131,7 +131,7 @@ import {
 } from "./main-session-event-worker.js";
 import { queuedMainSessionEventPromptEntry } from "./main-session-event-prompt.js";
 import {
-  runRuntimeDbMaintenance,
+  startRuntimeDbMaintenanceLoop,
   IDLE_DB_MAINTENANCE_PROGRESS,
   type DbMaintenanceProgress,
 } from "./db-maintenance.js";
@@ -4727,8 +4727,13 @@ export function buildRuntimeApiServer(options: BuildRuntimeApiServerOptions = {}
     // data.db compaction for the next boot. Fire-and-forget with a built-in
     // start delay so it never competes with boot; fully self-guarded, so it
     // cannot crash the runtime. Skipped in test/embedded builds via option.
+    //
+    // Repeats on an interval rather than running once: a desktop that stays
+    // open for days would otherwise never prune again after boot, which is how
+    // data.db grew to multiple GB in the field. Stops on `onClose` via the
+    // shared abort controller.
     if (options.enableDbMaintenance !== false) {
-      void runRuntimeDbMaintenance({
+      void startRuntimeDbMaintenanceLoop({
         store,
         logger: {
           info: (message, meta) => app.log.info(meta ?? {}, message),
