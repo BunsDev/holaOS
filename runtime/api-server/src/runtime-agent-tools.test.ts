@@ -4475,7 +4475,7 @@ test("updateWorkspaceInstructions replaces and clears the managed AGENTS.md sect
   }
 });
 
-test("installCapability tool installs a workspace-authored capability", () => {
+test("installCapability tool installs a workspace-authored capability", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "hb-cap-tool-"));
   writeRuntimeConfig(root, { runtime: { default_model: "openai/gpt-5.4" } });
   const workspaceRoot = path.join(root, "workspace");
@@ -4489,7 +4489,10 @@ test("installCapability tool installs a workspace-authored capability", () => {
       "id: demo-cap\nname: Demo\ndescription: d\nversion: 0.1.0\nskills:\n  - ref: demo-skill\nintegrations: []\n", "utf8");
 
     const service = new RuntimeAgentToolsService(store, { workspaceRoot });
-    const result = service.installCapability({ workspaceId, capabilityId: "demo-cap" }) as Record<string, unknown>;
+    const result = (await service.installCapability({
+      workspaceId,
+      capabilityId: "demo-cap",
+    })) as Record<string, unknown>;
 
     assert.ok(result.record);
     assert.equal(store.getWorkspaceCapability({ workspaceId, capabilityId: "demo-cap" })?.name, "Demo");

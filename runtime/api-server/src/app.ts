@@ -12050,7 +12050,10 @@ export function buildRuntimeApiServer(options: BuildRuntimeApiServerOptions = {}
       if (!capability) {
         return reply.code(404).send({ error: "capability not found" });
       }
-      const result = installCapability({
+      // installCapability is async: without the await this replied with a
+      // pending promise, which serializes to `{}` — and responded before the
+      // install had actually finished.
+      const result = await installCapability({
         store,
         workspaceId,
         workspaceDir: store.workspaceDir(workspaceId),

@@ -7604,13 +7604,19 @@ export class RuntimeAgentToolsService {
     return !childSession?.archivedAt;
   }
 
-  installCapability(params: RuntimeAgentToolsInstallCapabilityParams): JsonObject {
+  // Async: installWorkspaceAuthoredCapability returns a promise. This was
+  // declared sync and laundered the promise through `as unknown as JsonObject`,
+  // so the type checker could not see it — any caller that did not happen to
+  // await got a promise where it expected the install result.
+  async installCapability(
+    params: RuntimeAgentToolsInstallCapabilityParams,
+  ): Promise<JsonObject> {
     this.requireWorkspace(params.workspaceId);
     const capabilityId = normalizedString(params.capabilityId);
     if (!capabilityId) {
       throw new RuntimeAgentToolsServiceError(400, "capability_id_required", "capabilityId is required");
     }
-    const result = installWorkspaceAuthoredCapability({
+    const result = await installWorkspaceAuthoredCapability({
       store: this.store,
       workspaceId: params.workspaceId,
       workspaceDir: this.store.workspaceDir(params.workspaceId),
