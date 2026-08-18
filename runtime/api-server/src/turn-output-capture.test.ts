@@ -119,3 +119,54 @@ test("ignores files that existed before the run", () => {
   assert.equal(outputs.length, 1);
   assert.equal(outputs[0].filePath, "fresh.docx");
 });
+
+test("capped tool-result spills are not captured as outputs", () => {
+  // Observed live twice: a 240KB overflow file rendered beside the answer as a
+  // "Document · TXT" deliverable nobody asked for. Moving the spill from
+  // outputs/ to tmp/ did NOT fix it on its own — this capture diffs a
+  // before/after manifest of the WHOLE workspace, so location was never the
+  // criterion. The skip list is.
+  const workspace = makeTempDir();
+  const before = collectWorkspaceFileManifest(workspace);
+
+  fs.mkdirSync(path.join(workspace, "tmp", ".tool-results"), { recursive: true });
+  fs.writeFileSync(
+    path.join(workspace, "tmp", ".tool-results", "call_tool-call_fc4f2368.txt"),
+    "x".repeat(1024),
+  );
+  // The legacy location too, since existing workspaces still spill there.
+  fs.mkdirSync(path.join(workspace, "outputs", ".tool-results"), {
+    recursive: true,
+  });
+  fs.writeFileSync(
+    path.join(workspace, "outputs", ".tool-results", "composio_execute_tool-call_862f.txt"),
+    "y".repeat(1024),
+  );
+  // A genuine deliverable must still be captured.
+  fs.mkdirSync(path.join(workspace, "outputs"), { recursive: true });
+  fs.writeFileSync(path.join(workspace, "outputs", "report.md"), "# real");
+
+  const outputs = detectWorkspaceFileOutputs({
+    workspaceDir: workspace,
+    before,
+  });
+
+  assert.deepEqual(
+    outputs.map((output) => output.filePath),
+    ["outputs/report.md"],
+    "only the real deliverable should surface",
+  );
+});
+
+test("scratch under tmp/ is not a deliverable", () => {
+  // tmp/ should mean what it says: working state for the turn.
+  const workspace = makeTempDir();
+  const before = collectWorkspaceFileManifest(workspace);
+  fs.mkdirSync(path.join(workspace, "tmp"), { recursive: true });
+  fs.writeFileSync(path.join(workspace, "tmp", "scratch.json"), "{}");
+
+  assert.deepEqual(
+    detectWorkspaceFileOutputs({ workspaceDir: workspace, before }),
+    [],
+  );
+});

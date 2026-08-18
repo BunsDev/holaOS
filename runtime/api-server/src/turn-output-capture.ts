@@ -22,11 +22,24 @@ const SKIP_DIRECTORY_NAMES = new Set([
   ".git",
   ".holaboss",
   ".npm-cache",
+  // Capped tool results, offloaded by the harness so the model can `read` them.
+  // Scratch by construction — the file exists because the output was too big to
+  // inline, not because the user asked for it. Matched by directory NAME so it
+  // covers both tmp/.tool-results and the legacy outputs/.tool-results.
+  //
+  // Moving the spill out of outputs/ was not enough on its own: this capture
+  // diffs a before/after manifest of the WHOLE workspace, so any new file
+  // anywhere became an output regardless of where it sat. A 240KB overflow file
+  // kept appearing beside the answer as a TXT deliverable.
+  ".tool-results",
   ".venv",
   "__pycache__",
   "build",
   "dist",
   "node_modules",
+  // Scratch space should mean what it says. Anything the agent parks here is
+  // working state for the turn, not something the user asked to be produced.
+  "tmp",
 ]);
 
 // Runtime-managed control files, never user deliverables. The runtime rewrites
