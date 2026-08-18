@@ -1870,11 +1870,18 @@ const inProcessRunHarnessHost: TsRunnerExecutionDeps["runHarnessHost"] = async (
   // emitEvent, and pi's fallback writes NDJSON to THIS process's stdout — which
   // runner-worker parses as ts-runner's own event stream, bypassing the relay
   // (and therefore the harness-session-id persistence that resume depends on).
+  const logger = params.logger ?? console;
   if (params.harness !== "pi") {
+    // Say so. A flag that silently does nothing is indistinguishable from a
+    // flag that is not set, which makes it impossible to tell "off" from
+    // "on but skipped" from a log — as this cost an entire debugging round.
+    logger.warn(
+      `harness in-process: HB_HARNESS_IN_PROCESS is set but harness is "${params.harness}", not "pi" — using the subprocess`,
+    );
     return await defaultRunHarnessHost(params);
   }
+  logger.warn("harness in-process: running pi in ts-runner (no second spawn)");
   const startedAtMs = Date.now();
-  const logger = params.logger ?? console;
   installInProcessTerminationGuard(logger);
   inProcessTurnsActive += 1;
   try {
