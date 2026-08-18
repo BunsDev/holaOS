@@ -15,7 +15,9 @@
 // (a fresh worker + WASM init per call) — far too slow for image-heavy turns.
 // @napi-rs/canvas does the equivalent in ~30ms in-process (~50-80x faster).
 
-import { createCanvas, loadImage } from "@napi-rs/canvas";
+// Lazily loaded: the native binding is ~80ms of every harness-host boot, and
+// most turns never return an oversized image. See canvas-lazy.ts.
+import { loadCanvasModule } from "./canvas-lazy.js";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 
 /** Long-edge pixel cap (env-tunable). 2576 matches current vision models' own
@@ -63,6 +65,7 @@ export const canvasResizer: ImageResizer = async (
   { maxWidth, maxHeight, maxBytes },
 ) => {
   try {
+    const { createCanvas, loadImage } = await loadCanvasModule();
     const image = await loadImage(Buffer.from(bytes));
     if (!image.width || !image.height) {
       return null;

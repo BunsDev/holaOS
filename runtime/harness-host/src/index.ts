@@ -11,6 +11,17 @@ import { discoverHarnessModels } from "./model-discovery.js";
 import { compactPiSession } from "./pi.js";
 import { installBenignStdioEpipeGuard } from "./stdio-epipe.js";
 
+// In-process entry point for callers that want pi WITHOUT a second process
+// boot. Exported from here deliberately: pi is installed in this package and
+// `postinstall` patches this package's node_modules, so a copy resolved from
+// anywhere else would run unpatched. See in-process.ts.
+export {
+  runPiInProcess,
+  type RunPiInProcessParams,
+  type RunPiInProcessResult,
+  type InProcessRunnerEvent,
+} from "./in-process.js";
+
 type ReadableRequestStream = Pick<NodeJS.ReadableStream, "setEncoding"> &
   AsyncIterable<string | Buffer>;
 

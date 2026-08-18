@@ -172,12 +172,14 @@ tracked separately); changing the pi brain or the event contract.
 | # | Change | Removes | Per-turn saving (**unmeasured — see caveat**) | Risk |
 |---|---|---|---|---|
 | ~~0~~ | ~~Verify the composio cache is hitting~~ | ~~`session_setup`~~ | **DONE 2026-08-18** — it hits; ~675 ms already gone every turn | — |
-| **0b** | **Wire `clearComposioInlineCache` into the connect/install flows, then raise the TTL** | bootstrap's composio fetch | ~773 ms on most turns (see below) | **Low** — a few lines; the hook already exists and is tested |
-| **1** | Run pi **in-process** of ts-runner (collapse the double spawn) | 2nd Node boot | ~0.8–1.1 s target, **every turn** | **Med** — the seam is proven, the *lifecycle* is not; 6 blockers below, all fixable |
+| ~~0b~~ | ~~Wire `clearComposioInlineCache` into the connect/install flows, then raise the TTL~~ | ~~bootstrap's composio fetch~~ | **DONE 2026-08-18** — hook wired at 3 call sites (`integration-broker.ts`, `integrations.ts` ×2), TTL 120 s → 15 min. Confirmed live below: `composio_inline` is now **1–3 ms** and `session_setup` **38–52 ms** | — |
+| **1** | Run pi **in-process** of ts-runner (collapse the double spawn) | 2nd Node boot | ~0.8–1.1 s target, **every turn** | **IMPLEMENTED 2026-08-19, flag-off — awaiting the A/B below.** All 6 blockers handled + a 7th found (see below) |
 | ~~2~~ | ~~**Warm harness pool**~~ — **SHELVED**, see below | `harness_load` + residual `session_setup` | ~1.1 s, and Phase 1 already claims that | **High**, for a win Phase 1 gets more cheaply |
 | 3 | Lift warm lookup into api-server (skip per-turn ts-runner spawn too) | `ts_runner_load` + most `bootstrap` | ~1.2 s more, turns 2+ | High — bootstrap/compile currently lives in ts-runner |
 
-**Lever 0b is now the best leverage÷risk on the board**, and it did not exist in
+**Lever 1 is now the best leverage÷risk on the board** — 0b shipped, and the
+measurements below confirm it landed. (0b's original write-up follows for the
+record.) It did not exist in
 the original plan. `clearComposioInlineCache` (`composio-inline-cache.ts:119`) is
 exported, unit-tested, and documented as "the connect/install hook" — but
 **nothing in the repo calls it**. The 120 s TTL is therefore the *only*
@@ -639,3 +641,100 @@ wrong, though the staleness problem it pointed at is real for a different reason
 
 All file:line anchors were re-verified; the pre-revision draft's had drifted 4–207
 lines, and `pi.ts` was ambiguous between two files.
+
+## Live re-measurement — 5 real desktop turns, 2026-08-19
+
+`runtime.log` from a dev session (`holaboss-local-dev-onboard-4`), read straight
+off the `[ttft]` lines. Small n, so read the median loosely; the *shape* is what
+matters and it is unambiguous.
+
+| Phase | Median | Min | Max | Verdict |
+|---|---|---|---|---|
+| `ts_runner_load` | 260 ms | 240 | 1,167 | 1st Node spawn. Lever 3 territory. |
+| `bootstrap` | 287 ms | 201 | 1,445 | **Was ~960 ms. 0b landed.** |
+| `harness_load` | 992 ms | 892 | 1,918 | **2nd Node spawn — the biggest thing that is ours. Lever 1.** |
+| `session_setup` | 50 ms | 38 | 3,747 | **Was ~715 ms. 0b landed** (`composio_inline` 1–3 ms). |
+| `model_ttft` | 3,573 ms | 2,583 | 4,228 | Ark-side. Not ours, and larger than everything we control combined. |
+| `total_ttft` | 6,450 ms | 5,631 | 8,155 | |
+
+Three things this changes:
+
+1. **0b is confirmed in production numbers, not just in principle.** `bootstrap`
+   287 ms and `session_setup` 50 ms against the original 960 ms / 715 ms.
+
+2. **`harness_load` is now the whole of the addressable middle** — ~1 s on every
+   single turn, never below 892 ms. That is Lever 1's exact target and there is
+   no longer anything cheaper sitting in front of it.
+
+3. **Model latency dominates.** Of a best-case 5.6 s, ~3.6 s is the model and
+   ~1.5 s is our fixed init. Even a perfect Lever 1 + Lever 3 leaves a ~4 s
+   wait. Worth saying out loud before anyone spends a sprint on process
+   topology expecting the app to feel instant afterwards.
+
+### Two anomalies worth keeping
+
+- **One turn cost 8,155 ms with `ts_runner_load` 1,167 / `bootstrap` 1,445 /
+  `harness_load` 1,918** — every load phase inflated 2–5× *simultaneously*,
+  while `session_setup` stayed at 52 ms. A uniform inflation of exactly the
+  phases that spawn and cold-load Node, with the non-spawning phase unaffected,
+  is CPU contention, not a code path. (Test suites were running on the same
+  machine.) Do not chase this as a regression — but do treat "spawns two fresh
+  Node processes per turn" as the reason contention hurts this much, which is
+  another argument for Lever 1.
+
+- **One turn had `session_setup` 3,747 ms, of which `mcp_connect` was 3,677 ms**
+  against 2–4 ms on every other turn. That is a cold MCP sidecar spawn: the
+  sidecar is normally reused, so this is paid once per sidecar lifetime rather
+  than per turn. Not a per-turn cost, but it is a 3.7 s wait for whoever hits it,
+  and it is invisible in a median.
+
+## Phase 1 implementation notes — 2026-08-19
+
+Shipped behind `HB_HARNESS_IN_PROCESS=1`, **default off**. Nothing changes until
+the flag is set.
+
+**Blocker 0 resolved via option 1 (invert it).** `runPiInProcess` lives in
+`runtime/harness-host/src/in-process.ts` and is re-exported from that package's
+entry, so pi resolves from harness-host's own `node_modules` — the install its
+`postinstall` patches. api-server declares `@holaboss/runtime-harness-host` and
+calls across the boundary. One pi install, one patch set, as the option intended.
+
+Two things that fell out of doing it this way:
+
+- The entry already guards its CLI behind `import.meta.url === process.argv[1]`,
+  so re-exporting from `index.ts` costs nothing at import time and avoids a
+  second tsup entry duplicating the ~1.1 MB graph on disk (`splitting: false`).
+- The import in ts-runner is **dynamic and inside the flag branch**. A static one
+  would pull pi, mcporter and tree-sitter into ts-runner's own startup on every
+  turn — moving `harness_load` into `ts_runner_load` rather than removing it, and
+  making things *worse* with the flag off. Verified: `dist/ts-runner.mjs` grew
+  2.3 KB and keeps the bare specifier for runtime resolution.
+
+**Blocker 7 — the emit seam is sync, the relay is async.** Not in the original
+list. `PiDeps.emitEvent` is `=> void` and pi never awaits it, but the caller's
+`emitEvent` is `=> Promise<void>` and persists the harness session id. Naive
+fire-and-forget would let a later event's relay overtake an earlier one, and let
+`runPiInProcess` return before persistence finished — corrupting resume in a way
+that would only show up as an occasional lost conversation. Events now go through
+an ordered promise chain that is drained before returning, and a rejected relay
+cannot poison the events behind it.
+
+**Blocker 4** is handled by deferring SIGTERM/SIGINT while a turn is in flight
+(`IN_PROCESS_TERMINATION_GRACE_MS`, 30 s, env-tunable): runner-worker signals the
+instant a terminal event lands, and post-terminal compaction now runs *here*
+rather than in a surviving grandchild. With no turn in flight the signal behaves
+exactly as before.
+
+**Packaging risk is contained.** If `@holaboss/runtime-harness-host` fails to
+resolve in a packaged build, the dynamic import throws and the path falls back to
+`defaultRunHarnessHost` with a warning — a rollout problem degrades to today's
+behaviour instead of burning the user's turn.
+
+### Still to do — the gate
+
+A/B the authoritative `[ttft]` line with the flag on and off on the same machine.
+Expect `harness_load` → ~0 and `ts_runner_load` to grow (pi + mcporter +
+tree-sitter now load in ts-runner). **The win is the difference, not the
+`harness_load` figure** — the module graph still has to load, it just no longer
+needs a second process boot to do it. If the delta is not clearly positive,
+this stays off.

@@ -36,5 +36,13 @@
     "tree-sitter-wasms": "^0.1.12",
     "unpdf": "1.6.2",
     "web-tree-sitter": "^0.25.10"
+  },
+  "main": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.mjs"
+    }
   }
 }

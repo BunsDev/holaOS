@@ -1,4 +1,5 @@
-import { createCanvas, loadImage } from "@napi-rs/canvas";
+// Lazily loaded — see canvas-lazy.ts (~80ms off every turn's TTFT).
+import { loadCanvasModule } from "./canvas-lazy.js";
 
 // Match the model's own high-res ceiling: current-gen vision (Opus 4.7/4.8,
 // Fable 5) downsizes images to a ~2576px long edge (older models to 1568px), so
@@ -62,6 +63,7 @@ export async function downscaleInlineImage(
   }
   try {
     const source = Buffer.from(base64, "base64");
+    const { createCanvas, loadImage } = await loadCanvasModule();
     const image = await loadImage(source);
     const width = image.width;
     const height = image.height;

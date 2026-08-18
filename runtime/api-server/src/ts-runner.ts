@@ -1779,6 +1779,137 @@ function parseHarnessHostRunnerEvent(
   };
 }
 
+/**
+ * In-process pi — the same turn without a second Node boot.
+ *
+ * `defaultRunHarnessHost` spawns harness-host and pays fork + V8 init + node
+ * bootstrap + module resolution on every single turn (`harness_load`, measured
+ * at 892–1918ms on real turns, ~19% of the wait). The pi graph has to load
+ * either way; loading it in this already-running V8 skips the process boot.
+ *
+ * Gated on HB_HARNESS_IN_PROCESS and OFF by default. The subprocess provides
+ * several guarantees for free that the in-process path has to reproduce by hand
+ * (honest terminal accounting, post-terminal error isolation, ordered relay, a
+ * first-event watchdog) — see runtime/harness-host/src/in-process.ts, where they
+ * are implemented and explained.
+ *
+ * The import is DYNAMIC and inside the branch on purpose: a static import would
+ * pull pi, mcporter and tree-sitter into ts-runner's own startup on every turn,
+ * which would move the cost into `ts_runner_load` rather than remove it — making
+ * things worse whenever the flag is off.
+ */
+/**
+ * Blocker 4 — keep the turn alive through the SIGTERM that ends it.
+ *
+ * runner-worker SIGTERMs ts-runner the instant a terminal event arrives
+ * (`runner-worker.ts:834`). With the subprocess that is harmless: pi's
+ * post-terminal work — `maybeCompactSessionOverThreshold()`, explicitly
+ * documented as running AFTER the terminal event, then `dispose()` — completes
+ * in the surviving grandchild, because ts-runner is not a process-group leader
+ * so the kill only reaches ts-runner itself.
+ *
+ * In-process that same work is running HERE, inside an `await runPi(...)` that
+ * has not returned. Node's default SIGTERM disposition would terminate the
+ * process mid-compaction on EVERY turn, and long sessions would quietly stop
+ * shrinking until they blow the context window. Nothing would report it.
+ *
+ * So while a turn is in flight the signal is deferred: ts-runner finishes the
+ * turn and its own post-turn relay, then exits naturally. A bounded grace timer
+ * force-exits if the turn never settles, so a wedged run cannot outlive the
+ * signal indefinitely. With no turn in flight the signal behaves exactly as it
+ * does today.
+ */
+const IN_PROCESS_TERMINATION_GRACE_MS = Number(
+  process.env.HB_HARNESS_IN_PROCESS_GRACE_MS ?? "",
+) || 30_000;
+let inProcessTurnsActive = 0;
+let inProcessTerminationDeferred = false;
+let inProcessSignalGuardInstalled = false;
+
+function installInProcessTerminationGuard(logger: LoggerLike): void {
+  if (inProcessSignalGuardInstalled) {
+    return;
+  }
+  inProcessSignalGuardInstalled = true;
+  for (const signal of ["SIGTERM", "SIGINT"] as const) {
+    process.on(signal, () => {
+      if (inProcessTurnsActive === 0) {
+        // Same disposition as before the guard existed.
+        process.exit(0);
+        return;
+      }
+      if (inProcessTerminationDeferred) {
+        return;
+      }
+      inProcessTerminationDeferred = true;
+      logger.warn(
+        `harness in-process: deferring ${signal} until the in-flight turn finishes (post-terminal compaction runs here now)`,
+      );
+      const graceTimer = setTimeout(() => {
+        logger.warn(
+          `harness in-process: turn did not settle within ${IN_PROCESS_TERMINATION_GRACE_MS}ms after ${signal}; exiting`,
+        );
+        process.exit(0);
+      }, IN_PROCESS_TERMINATION_GRACE_MS);
+      graceTimer.unref?.();
+    });
+  }
+}
+
+export function harnessInProcessEnabled(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return (env.HB_HARNESS_IN_PROCESS ?? "").trim() === "1";
+}
+
+const inProcessRunHarnessHost: TsRunnerExecutionDeps["runHarnessHost"] = async (
+  params,
+) => {
+  // Only pi has a proven in-process seam. Every other harness keeps cold spawn:
+  // `HarnessHostPlugin.run` takes no deps argument, so there is nowhere to pass
+  // emitEvent, and pi's fallback writes NDJSON to THIS process's stdout — which
+  // runner-worker parses as ts-runner's own event stream, bypassing the relay
+  // (and therefore the harness-session-id persistence that resume depends on).
+  if (params.harness !== "pi") {
+    return await defaultRunHarnessHost(params);
+  }
+  const startedAtMs = Date.now();
+  const logger = params.logger ?? console;
+  installInProcessTerminationGuard(logger);
+  inProcessTurnsActive += 1;
+  try {
+    const { runPiInProcess } = await import("@holaboss/runtime-harness-host");
+    const result = await runPiInProcess({
+      requestPayload: params.requestPayload,
+      emitEvent: async (event) => {
+        await params.emitEvent(event as TsRunnerEvent);
+      },
+      firstEventTimeoutMs: HARNESS_HOST_FIRST_EVENT_TIMEOUT_MS,
+      logger,
+    });
+    return {
+      exitCode: result.exitCode,
+      stderr: result.stderr,
+      sawEvent: result.sawEvent,
+      terminalEmitted: result.terminalEmitted,
+      lastSequence: result.lastSequence,
+      harnessSpawnToFirstEventMs: result.harnessSpawnToFirstEventMs,
+      harnessSpawnToFirstTokenMs: result.harnessSpawnToFirstTokenMs,
+    };
+  } catch (error) {
+    // Failing to LOAD the in-process path (a packaging or resolution problem) is
+    // not a failed turn — fall back to the subprocess rather than burning the
+    // user's turn on our rollout.
+    const message = error instanceof Error ? error.message : String(error);
+    logger.warn(
+      `harness in-process unavailable after ${Date.now() - startedAtMs}ms, falling back to spawn: ${message}`,
+    );
+    return await defaultRunHarnessHost(params);
+  } finally {
+    inProcessTurnsActive = Math.max(0, inProcessTurnsActive - 1);
+  }
+};
+
 function harnessHostEntryPath(): { entryPath: string; argsPrefix: string[] } {
   const currentFile = fileURLToPath(import.meta.url);
   const runtimeRoot = runtimeRootDir();
@@ -2063,7 +2194,9 @@ function defaultExecutionDeps(): TsRunnerExecutionDeps {
       compileWorkspaceRuntimePlanFromWorkspace({ workspaceId, workspaceDir }),
     projectAgentRuntimeConfig: (request) => projectAgentRuntimeConfig(request),
     resolveHarnessPlugin: (harness) => requireRuntimeHarnessPlugin(harness),
-    runHarnessHost: defaultRunHarnessHost,
+    runHarnessHost: harnessInProcessEnabled()
+      ? inProcessRunHarnessHost
+      : defaultRunHarnessHost,
     loadOperatorSurfaceContext,
     loadRecalledMemoryContext,
     startWorkspaceMcpSidecar: async (request) => {

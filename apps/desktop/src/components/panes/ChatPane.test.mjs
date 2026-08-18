@@ -277,7 +277,10 @@ test("chat pane does not adopt unmatched done or error stream frames and refresh
   assert.doesNotMatch(source, /action: "adopt_stream_for_error"/);
   assert.match(
     source,
-    /if \(payload\.type === "done"\) \{[\s\S]*const refreshSessionId = activeSessionIdRef\.current;[\s\S]*action: "applied_done"[\s\S]*if \(refreshSessionId && selectedWorkspaceId\) \{[\s\S]*scheduleConversationRefresh\(refreshSessionId, selectedWorkspaceId\);[\s\S]*\}/,
+    // The refresh now carries the committed turn's id so the ladder waits for it
+    // to be queryable — without that the turn is dropped for ~350ms at the end
+    // of every response (see refreshLadder.test.ts).
+    /if \(payload\.type === "done"\) \{[\s\S]*const refreshSessionId = activeSessionIdRef\.current;[\s\S]*action: "applied_done"[\s\S]*if \(refreshSessionId && selectedWorkspaceId\) \{[\s\S]*scheduleConversationRefresh\(refreshSessionId, selectedWorkspaceId, \{\s*awaitAssistantMessageId: committedAssistantMessage,\s*\}\);[\s\S]*\}/,
   );
   assert.match(
     source,

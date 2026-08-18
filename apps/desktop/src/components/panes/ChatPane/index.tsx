@@ -196,6 +196,11 @@ import {
   MENTION_TOKEN_PATTERN,
 } from "./constants";
 import {
+  DEFAULT_STALL_THRESHOLD_MS,
+  formatGap,
+  groupStreamTelemetry,
+} from "./streamTelemetryView";
+import {
   attachmentLooksLikeImage,
   pendingAttachmentIsImage,
   supportsImageInput,
@@ -3892,6 +3897,10 @@ export function ChatPane({
   const [streamTelemetry, setStreamTelemetry] = useState<
     StreamTelemetryEntry[]
   >([]);
+  const [streamTelemetryRawView, setStreamTelemetryRawView] = useState(false);
+  const [streamTelemetryExpanded, setStreamTelemetryExpanded] = useState<
+    Record<string, boolean>
+  >({});
   const streamTelemetryRingRef = useRef<StreamTelemetryEntry[]>([]);
   const streamTelemetryFlushTimerRef = useRef<number | null>(null);
   const [imageAttachmentPreview, setImageAttachmentPreview] =
@@ -4085,12 +4094,17 @@ export function ChatPane({
   const isExternalSessionOpenRequest = sessionOpenRequest !== null;
 
   function appendStreamTelemetry(
-    entry: Omit<StreamTelemetryEntry, "id" | "at">,
+    entry: Omit<StreamTelemetryEntry, "id" | "at"> & { at?: string },
   ) {
     if (!verboseTelemetryEnabled) {
       return;
     }
-    const at = new Date().toISOString().slice(11, 23);
+    // `at` is overridable because main-process entries arrive in batches long
+    // after they happened. Stamping those on arrival gave every one of them the
+    // same fabricated time — a whole burst reading 12.585 — which makes the
+    // main-side rows look simultaneous and invents a causal order that never
+    // existed. When the origin knows the real time, it wins.
+    const at = entry.at ?? new Date().toISOString().slice(11, 23);
     const next: StreamTelemetryEntry = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       at,
@@ -4710,9 +4724,28 @@ export function ChatPane({
     const persistedInputIds = new Set(
       turnInputIdsFromHistoryMessages(page.history.messages),
     );
+    // The runtime's status LAGS the stream's terminal frame: at the 150ms
+    // refresh rung its agent_runs row is frequently still BUSY for a run whose
+    // run_completed we already applied. And both refs being null is exactly what
+    // "we just finished" looks like — they are cleared by the terminal handler.
+    //
+    // So without a memory of which inputs have terminated, this predicate reads
+    // a just-finished turn as an unattached live run and re-opens the stream with
+    // includeHistory: true. The runtime then replays every event of the turn from
+    // sequence 1, and the renderer drops all of them as unmatched
+    // (input_match=false) because pendingInputIdRef was cleared. That is a full
+    // wasted replay on every single turn — a hundred-odd events produced,
+    // shipped over IPC and discarded.
+    //
+    // The terminal-event map already records this; it just was not consulted.
+    const runtimeInputAlreadyTerminated = Boolean(
+      currentRuntimeInputId &&
+        terminalEventTypeByInputIdRef.current.has(currentRuntimeInputId),
+    );
     const shouldAttachLiveRunStream =
       !activeStreamIdRef.current &&
       !pendingInputIdRef.current &&
+      !runtimeInputAlreadyTerminated &&
       ["BUSY", "QUEUED"].includes(currentRuntimeStatus);
 
     // Render the conversation from whatever traces/outputs we have: empty (or
@@ -6250,6 +6283,8 @@ export function ChatPane({
             }
             seenMainDebugKeysRef.current.add(key);
             appendStreamTelemetry({
+              // The main process's own timestamp, not the moment we merged it.
+              at: entry.at.slice(11, 23),
               streamId: entry.streamId,
               transportType: "main",
               eventName: entry.phase,
@@ -6457,6 +6492,24 @@ export function ChatPane({
             return;
           }
           const refreshSessionId = activeSessionIdRef.current;
+          // Commit the live turn here, exactly as the run_completed path does.
+          // Without this the turn is still only live state when the 150ms
+          // refresh lands, and that refresh both replaces `messages` with the
+          // server's list (which has not persisted the turn yet) AND calls
+          // resetLiveTurn() — so the turn belongs to neither and vanishes for
+          // ~350ms until the 500ms rung. That is the end-of-response flicker:
+          // preserveCommittedAssistantTurns cannot hold what was never
+          // committed, so the earlier fix only ever covered the run_completed
+          // path. Whichever terminal signal arrives first now commits.
+          //
+          // MUST run before activeAssistantMessageIdRef is cleared: the commit
+          // derives the message id from it, and that id has to equal the
+          // server's `assistant-${inputId}` or the held copy never settles and
+          // shows up as a duplicate instead of a flicker.
+          //
+          // Safe to have both paths commit: commitLiveAssistantMessage resets
+          // the live refs, so the second call finds no segments and no-ops.
+          const committedAssistantMessage = commitLiveAssistantMessage();
           setIsResponding(false);
           activeAssistantMessageIdRef.current = null;
           activeStreamIdRef.current = null;
@@ -6472,7 +6525,9 @@ export function ChatPane({
             detail: "stream done",
           });
           if (refreshSessionId && selectedWorkspaceId) {
-            scheduleConversationRefresh(refreshSessionId, selectedWorkspaceId);
+            scheduleConversationRefresh(refreshSessionId, selectedWorkspaceId, {
+              awaitAssistantMessageId: committedAssistantMessage,
+            });
           }
           return;
         }
@@ -7141,6 +7196,22 @@ export function ChatPane({
     ) {
       return;
     }
+    // Time-to-first-token has to be measured from the user's action, not from
+    // the stream open — everything before the open (queueing the input, the
+    // round trip that returns an input_id) is time they are staring at an empty
+    // canvas. Without this milestone the timeline silently starts late and the
+    // slowest phase can hide in front of it. The input id is unknown here, so
+    // this is stamped bare and stitched to the turn by arrival order.
+    appendStreamTelemetry({
+      streamId: "",
+      transportType: "user",
+      eventName: "submit",
+      eventType: "submit",
+      inputId: "",
+      sessionId: activeSessionIdRef.current ?? "",
+      action: "submit",
+      detail: `chars=${trimmed.length}`,
+    });
     if (usesHostedManagedCredits) {
       if (isOutOfCredits) {
         setChatErrorMessage("You're out of credits for managed usage.");
@@ -8593,6 +8664,13 @@ export function ChatPane({
       : activeQueuedSessionInputs;
   const streamTelemetryTail = useMemo(
     () => streamTelemetry.slice(-80).reverse(),
+    [streamTelemetry],
+  );
+  // Grouped view. Derived from the same ring the raw view uses, and only ever
+  // recomputed when the ring flushes (every 250ms), so the diagnostic cannot
+  // become part of the jank it is meant to measure.
+  const streamTelemetryTurns = useMemo(
+    () => groupStreamTelemetry(streamTelemetry.slice(-400)),
     [streamTelemetry],
   );
   const pendingAttachmentItems = useMemo<AttachmentListItem[]>(
@@ -10257,26 +10335,37 @@ export function ChatPane({
 
           {verboseTelemetryEnabled ? (
             <div className="bg-muted mt-3 rounded-xl border border-border px-3 py-2">
-              <div className="mb-2 flex items-center justify-between">
+              <div className="mb-2 flex items-center justify-between gap-2">
                 <div className="text-[10px] text-muted-foreground">
                   Stream telemetry ({streamTelemetry.length})
                 </div>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="xs"
-                  onClick={() => setStreamTelemetry([])}
-                  className="text-[10px]"
-                >
-                  Clear
-                </Button>
+                <div className="flex items-center gap-1.5">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="xs"
+                    onClick={() => setStreamTelemetryRawView((raw) => !raw)}
+                    className="text-[10px]"
+                  >
+                    {streamTelemetryRawView ? "Grouped" : "Raw"}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="xs"
+                    onClick={() => setStreamTelemetry([])}
+                    className="text-[10px]"
+                  >
+                    Clear
+                  </Button>
+                </div>
               </div>
               <div className="bg-muted max-h-36 overflow-y-auto rounded border border-border p-2 font-mono text-[10px] text-muted-foreground">
-                {streamTelemetryTail.length === 0 ? (
+                {streamTelemetry.length === 0 ? (
                   <div className="text-muted-foreground">
                     No stream events yet.
                   </div>
-                ) : (
+                ) : streamTelemetryRawView ? (
                   streamTelemetryTail.map((entry) => (
                     <div
                       key={entry.id}
@@ -10285,6 +10374,134 @@ export function ChatPane({
                       {`${entry.at} ${entry.action} stream=${entry.streamId} transport=${entry.transportType} event=${entry.eventType || entry.eventName} input=${entry.inputId || "-"} session=${entry.sessionId || "-"} detail=${entry.detail || "-"}`}
                     </div>
                   ))
+                ) : (
+                  streamTelemetryTurns.map((turn) => {
+                    const turnKey = turn.inputId || turn.startedAt;
+                    const rowsExpanded = streamTelemetryExpanded[turnKey] === true;
+                    const visibleRows = rowsExpanded
+                      ? turn.rows
+                      : turn.rows.filter((row) => row.origin !== "main");
+                    return (
+                    <div key={turnKey} className="mb-3">
+                      <div className="flex flex-wrap items-baseline gap-x-2 text-foreground">
+                        <span className="font-semibold">
+                          turn {turn.shortInputId}
+                        </span>
+                        <span className="text-muted-foreground">
+                          {turn.startedAt}
+                        </span>
+                        {turn.latency.toFirstTokenMs !== null ? (
+                          <span className="font-semibold">
+                            {turn.latency.startsAtStreamOpen ? "≥" : ""}
+                            {(turn.latency.toFirstTokenMs / 1_000).toFixed(2)}s to
+                            first {turn.latency.firstTokenKind === "output" ? "output" : "token"}
+                          </span>
+                        ) : null}
+                        {turn.stalls > 0 ? (
+                          <span className="text-warning">
+                            {turn.stalls} stall{turn.stalls === 1 ? "" : "s"}
+                          </span>
+                        ) : null}
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setStreamTelemetryExpanded((current) => ({
+                              ...current,
+                              [turnKey]: !rowsExpanded,
+                            }))
+                          }
+                          className="text-[10px] underline decoration-dotted"
+                        >
+                          {rowsExpanded ? "hide events" : `${turn.rows.length} events`}
+                        </button>
+                      </div>
+
+                      {/* The waterfall: where the wait actually went. Each phase
+                          blames exactly one component, so the widest bar is the
+                          thing to go fix. */}
+                      {turn.latency.phases.length > 0 ? (
+                        <div className="mt-1 mb-1 grid gap-0.5 pl-3">
+                          {turn.latency.phases.map((phase) => (
+                            <div
+                              key={phase.label}
+                              className="flex items-center gap-2"
+                              title={phase.blames}
+                            >
+                              <span className="w-24 shrink-0 truncate text-muted-foreground">
+                                {phase.label}
+                              </span>
+                              <span className="w-16 shrink-0 text-right tabular-nums">
+                                {phase.durationMs < 1000
+                                  ? `${phase.durationMs}ms`
+                                  : `${(phase.durationMs / 1000).toFixed(2)}s`}
+                              </span>
+                              <span className="relative h-2 min-w-0 flex-1 overflow-hidden rounded-sm bg-foreground/8">
+                                <span
+                                  className={`absolute inset-y-0 left-0 rounded-sm ${
+                                    phase.dominant ? "bg-warning" : "bg-foreground/35"
+                                  }`}
+                                  style={{
+                                    width: `${Math.max(1, phase.share * 100)}%`,
+                                  }}
+                                />
+                              </span>
+                              {phase.dominant ? (
+                                <span className="shrink-0 truncate text-muted-foreground">
+                                  {phase.blames}
+                                </span>
+                              ) : null}
+                            </div>
+                          ))}
+                        </div>
+                      ) : null}
+
+                      {visibleRows.map((row) => (
+                        <div
+                          key={row.key}
+                          className={`flex flex-wrap items-baseline gap-x-2 whitespace-pre-wrap break-all pl-3 ${
+                            row.stalled ? "text-warning" : ""
+                          }`}
+                        >
+                          <span className="w-16 shrink-0 text-right tabular-nums">
+                            {formatGap(row.deltaMs)}
+                          </span>
+                          <span className={row.origin === "main" ? "opacity-60" : ""}>
+                            {row.origin === "main" ? "main·" : ""}
+                            {row.label}
+                            {row.count > 1 ? ` ×${row.count}` : ""}
+                          </span>
+                          {row.chars !== null ? (
+                            <span className="text-muted-foreground">
+                              {row.chars} chars
+                            </span>
+                          ) : null}
+                          {/* The apply lag is the renderer's own cost — shown only
+                              when it is the interesting number, so a normal row
+                              stays short. */}
+                          {row.applyLagMs !== null && row.applyLagMs > 0 ? (
+                            <span
+                              className={
+                                row.applyLagMs >= DEFAULT_STALL_THRESHOLD_MS
+                                  ? "font-semibold"
+                                  : "text-muted-foreground"
+                              }
+                            >
+                              apply {formatGap(row.applyLagMs)}
+                            </span>
+                          ) : null}
+                          {row.outcome && row.outcome !== "applied" ? (
+                            <span className="font-semibold">{row.outcome}</span>
+                          ) : null}
+                          {row.detail && row.detail !== "-" ? (
+                            <span className="text-muted-foreground">
+                              {row.detail}
+                            </span>
+                          ) : null}
+                        </div>
+                      ))}
+                    </div>
+                    );
+                  })
                 )}
               </div>
             </div>
