@@ -4,6 +4,7 @@ import { test } from "node:test";
 import {
   type DbMaintenanceStore,
   runRuntimeDbMaintenance,
+  startRuntimeDbMaintenanceLoop,
 } from "./db-maintenance.js";
 
 /** In-memory fake of the retention surface — no native DB needed. */
@@ -231,6 +232,102 @@ test("a small backlog is not heavy (stays a silent background sweep)", async () 
 
   assert.ok(progress.every((p) => p.heavy === false));
   assert.equal(progress.at(-1)?.done, true);
+});
+
+test("the loop sweeps repeatedly, not just once at boot", async () => {
+  const store = new FakeStore();
+  store.outputEventRetentionPolicy = { maxAgeDays: 30, maxEventsPerSession: 0 };
+
+  // Every sweep emits exactly one "estimating" before it prunes, so counting
+  // them counts sweeps. A one-shot implementation never gets past 1 — which is
+  // precisely the bug that let data.db grow unbounded on long-lived installs.
+  let sweeps = 0;
+  const controller = new AbortController();
+  const loop = startRuntimeDbMaintenanceLoop({
+    store,
+    ...fastOpts,
+    intervalMs: 1,
+    requestCompaction: false,
+    signal: controller.signal,
+    onProgress: (p) => {
+      if (p.phase === "estimating") {
+        sweeps += 1;
+      }
+    },
+  });
+
+  const deadline = Date.now() + 2_000;
+  while (sweeps < 2 && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 1));
+  }
+  controller.abort();
+  await loop;
+
+  assert.ok(sweeps >= 2, `expected repeated sweeps, saw ${sweeps}`);
+});
+
+test("background sweeps can never raise the blocking boot screen", async () => {
+  const store = new FakeStore();
+  store.outputEventRetentionPolicy = { maxAgeDays: 30, maxEventsPerSession: 0 };
+  store.seed("s1", 200, "2026-01-01T00:00:00.000Z");
+
+  // BootGate blocks the UI on `heavy && !done`. The first sweep may legitimately
+  // be heavy; every later one must not be, or a mid-session background sweep
+  // could drop the user back onto the boot splash.
+  //
+  // Re-seed after each sweep so the backlog stays above the threshold — a
+  // workload that keeps producing prunable rows. Without that the estimate
+  // falls to zero after sweep 1 and `heavy` would read false whether or not the
+  // guard is doing anything.
+  const heavyBySweep: boolean[] = [];
+  const controller = new AbortController();
+  const loop = startRuntimeDbMaintenanceLoop({
+    store,
+    ...fastOpts,
+    intervalMs: 1,
+    heavyThreshold: 10, // trivially exceeded, so sweep 1 is heavy
+    requestCompaction: false,
+    signal: controller.signal,
+    onProgress: (p) => {
+      if (p.phase === "estimating") {
+        heavyBySweep.push(p.heavy);
+      }
+      if (p.phase === "done") {
+        store.seed("s1", 200, "2026-01-01T00:00:00.000Z");
+      }
+    },
+  });
+
+  const deadline = Date.now() + 2_000;
+  while (heavyBySweep.length < 2 && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 1));
+  }
+  controller.abort();
+  await loop;
+
+  assert.equal(heavyBySweep[0], true, "first sweep should be heavy here");
+  assert.ok(
+    heavyBySweep.slice(1).every((heavy) => heavy === false),
+    `later sweeps must never be heavy, saw ${JSON.stringify(heavyBySweep)}`,
+  );
+});
+
+test("the loop resolves on abort instead of running forever", async () => {
+  const store = new FakeStore();
+  store.outputEventRetentionPolicy = { maxAgeDays: 30, maxEventsPerSession: 0 };
+  const controller = new AbortController();
+
+  const loop = startRuntimeDbMaintenanceLoop({
+    store,
+    ...fastOpts,
+    // Would idle for an hour between sweeps if abort were ignored.
+    intervalMs: 3_600_000,
+    requestCompaction: false,
+    signal: controller.signal,
+  });
+
+  controller.abort();
+  await loop; // hangs the test run if the loop ignores the signal
 });
 
 test("aborting stops the sweep promptly", async () => {

@@ -92,6 +92,12 @@ export interface DbMaintenanceOptions {
 }
 
 const DEFAULT_START_DELAY_MS = 30_000;
+/**
+ * Gap between background retention sweeps. Long enough to be invisible, short
+ * enough that a desktop left open for days can't accumulate an unbounded
+ * backlog between sweeps.
+ */
+const DEFAULT_REPEAT_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const DEFAULT_BATCH_SIZE = 5_000;
 const DEFAULT_PAUSE_MS = 250;
 const DEFAULT_COMPACT_AFTER_DELETES = 50_000;
@@ -335,4 +341,50 @@ export async function runRuntimeDbMaintenance(
   emitProgress("done", true);
 
   return result;
+}
+
+/**
+ * Run {@link runRuntimeDbMaintenance} on a repeating schedule until `signal`
+ * aborts. Resolves only on shutdown.
+ *
+ * One sweep enforces retention at the instant it runs, so a single boot-time
+ * call bounds nothing for an app that then stays open for days — which is how
+ * `data.db` reached multiple GB in the field *despite* the policy being
+ * enforced: the age cutoff only becomes eligible while the runtime is up, and
+ * nothing was re-checking it. Repeating the sweep is what actually bounds the
+ * table for a long-lived desktop.
+ *
+ * Sweeps after the first can never be flagged `heavy`. The blocking
+ * "Optimizing storage…" screen is a boot affordance keyed on
+ * `heavy && !done` (see BootGate), and a mid-session background sweep must not
+ * be able to raise it.
+ */
+export async function startRuntimeDbMaintenanceLoop(
+  options: DbMaintenanceOptions & {
+    /** Gap between sweeps. Defaults to 6h. */
+    intervalMs?: number;
+  },
+): Promise<void> {
+  const { intervalMs = DEFAULT_REPEAT_INTERVAL_MS, ...sweepOptions } = options;
+  const { signal } = sweepOptions;
+
+  // runRuntimeDbMaintenance never throws, so the loop needs no guard of its own.
+  await runRuntimeDbMaintenance(sweepOptions);
+
+  while (!signal?.aborted) {
+    try {
+      await sleep(intervalMs, undefined, { signal });
+    } catch {
+      return; // AbortError — shutdown requested.
+    }
+    if (signal?.aborted) {
+      return;
+    }
+    await runRuntimeDbMaintenance({
+      ...sweepOptions,
+      // The interval is already the boot-competition delay.
+      startDelayMs: 0,
+      heavyThreshold: Number.POSITIVE_INFINITY,
+    });
+  }
 }
