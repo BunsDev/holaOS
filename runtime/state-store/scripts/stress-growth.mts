@@ -164,6 +164,20 @@ const sweepStarted = process.hrtime.bigint();
 const pruned = reopened.trimRootOutputEventsToTotal({ keep: 250_000, limit: 5_000 });
 const sweepMs = ms(sweepStarted);
 
+// 4. Snapshot retention — the axis that had none until now.
+const snapshotsBefore = reopened.countRootTurnRequestSnapshots();
+const snapStarted = process.hrtime.bigint();
+let snapPruned = 0;
+for (;;) {
+  const deleted = reopened.trimRootTurnRequestSnapshotsToTotal({
+    keep: 1_000,
+    limit: 5_000,
+  });
+  if (deleted === 0) break;
+  snapPruned += deleted;
+}
+const snapMs = ms(snapStarted);
+
 const counted = reopened.countRootOutputEvents();
 reopened.close();
 
@@ -172,7 +186,9 @@ console.log("------------------------------------");
 console.log(`PRAGMA quick_check          ${quickCheckMs.toFixed(0).padStart(7)} ms   <- boot, after an unclean exit`);
 console.log(`load one session's events   ${readMs.toFixed(0).padStart(7)} ms   <- every conversation paint`);
 console.log(`retention sweep, 1 batch    ${sweepMs.toFixed(0).padStart(7)} ms   <- background`);
-console.log(`\nevents now: ${counted.toLocaleString()} (sweep removed ${pruned.toLocaleString()}), read ${events.length} rows`);
+console.log(`snapshot trim to 1,000      ${snapMs.toFixed(0).padStart(7)} ms   <- was unbounded before`);
+console.log(`\nsnapshots: ${snapshotsBefore.toLocaleString()} -> ${(snapshotsBefore - snapPruned).toLocaleString()}`);
+console.log(`events now: ${counted.toLocaleString()} (sweep removed ${pruned.toLocaleString()}), read ${events.length} rows`);
 console.log(
   `\nper-turn cost: ${((sizeBytes / (SESSIONS * TURNS_PER_SESSION)) / 1024).toFixed(0)} KB/turn`,
 );

@@ -1110,6 +1110,7 @@ export interface RuntimeStateStoreOptions {
    * {@link DEFAULT_OUTPUT_EVENT_RETENTION}; tests override with tiny values.
    */
   outputEventRetention?: Partial<OutputEventRetentionPolicy>;
+  turnRequestSnapshotRetention?: Partial<TurnRequestSnapshotRetentionPolicy>;
 }
 
 /**
@@ -1141,6 +1142,40 @@ export interface OutputEventRetentionPolicy {
  * sessions). Chosen with the product owner over the aggressive/conservative
  * alternatives.
  */
+/**
+ * Retention for `turn_request_snapshots`.
+ *
+ * That table was INSERT-only: nothing in the runtime ever deleted a row. At a
+ * measured ~204KB per turn it is the single largest row class there is, and it
+ * grew without bound — a stress run put 3,000 turns at 1,826MB, of which ~612MB
+ * was snapshots that would never be reclaimed. The output-event retention added
+ * earlier bounds events but not these, so a long-lived workspace would still
+ * walk into the size that made `PRAGMA quick_check` take 80s and livelock boot,
+ * just through a different door.
+ *
+ * These are not inert debug rows. `reusableTurnRequestSnapshotTemplate` scans a
+ * session's most recent snapshots to reuse an already-built request instead of
+ * rebuilding it, so the retention has to leave that window intact. The trims are
+ * therefore NEWEST-first-preserving: an active session keeps its recent
+ * snapshots, and what ages out belongs to turns that will never be reused as a
+ * template anyway.
+ */
+export interface TurnRequestSnapshotRetentionPolicy {
+  maxAgeDays: number;
+  maxTotalSnapshots: number;
+}
+
+export const DEFAULT_TURN_REQUEST_SNAPSHOT_RETENTION: TurnRequestSnapshotRetentionPolicy =
+  {
+    // Matches the event policy. A month-old snapshot cannot serve as a template
+    // for a live turn — its session is long finished.
+    maxAgeDays: 30,
+    // ~204KB/row, so 1,000 rows is ~200MB: the same order as the event cap, and
+    // far above the reuse window (that scan looks at 100 for ONE session). Only
+    // bites the runaway case it exists for.
+    maxTotalSnapshots: 1_000,
+  };
+
 export const DEFAULT_OUTPUT_EVENT_RETENTION: OutputEventRetentionPolicy = {
   maxAgeDays: 30,
   maxEventsPerSession: 25_000,
@@ -1599,6 +1634,7 @@ export class RuntimeStateStore {
   readonly sandboxAgentHarness: string | null;
   readonly #onMigrationEvent: ((event: MigrationLogEvent) => void) | undefined;
   readonly #outputEventRetention: OutputEventRetentionPolicy;
+  readonly #turnRequestSnapshotRetention: TurnRequestSnapshotRetentionPolicy;
   readonly #portInUseProbe: (port: number) => boolean;
   // In-process signal fired after each session_output_event insert, so the SSE
   // stream can wake on write instead of polling on a fixed interval — the
@@ -1637,6 +1673,10 @@ export class RuntimeStateStore {
     this.#outputEventRetention = {
       ...DEFAULT_OUTPUT_EVENT_RETENTION,
       ...(options.outputEventRetention ?? {}),
+    };
+    this.#turnRequestSnapshotRetention = {
+      ...DEFAULT_TURN_REQUEST_SNAPSHOT_RETENTION,
+      ...(options.turnRequestSnapshotRetention ?? {}),
     };
     this.sandboxAgentHarness = (options.sandboxAgentHarness ?? process.env.SANDBOX_AGENT_HARNESS ?? "").trim() || null;
     this.#portInUseProbe = options.portInUseProbe ?? defaultPortInUseProbe;
@@ -5886,6 +5926,10 @@ export class RuntimeStateStore {
     return this.#outputEventRetention;
   }
 
+  get turnRequestSnapshotRetentionPolicy(): TurnRequestSnapshotRetentionPolicy {
+    return this.#turnRequestSnapshotRetention;
+  }
+
   /**
    * Enforce the per-session retention cap: keep the newest `maxEvents` rows for
    * `sessionId`, deleting older ones. Optionally bound the number deleted this
@@ -6040,6 +6084,68 @@ export class RuntimeStateStore {
         DELETE FROM session_output_events
         WHERE id IN (
           SELECT id FROM session_output_events ORDER BY id ASC LIMIT ?
+        )
+      `)
+      .run(batch);
+    return result.changes ?? 0;
+  }
+
+  countRootTurnRequestSnapshots(): number {
+    const row = this.rootRuntimeDb()
+      .prepare(`SELECT COUNT(*) AS n FROM turn_request_snapshots`)
+      .get() as { n?: number } | undefined;
+    return row?.n ?? 0;
+  }
+
+  /** Background-sweep primitive: delete snapshots older than `cutoffIso`, up to
+   *  `limit`. Batched so the sweep never holds the write lock. */
+  pruneRootTurnRequestSnapshotsByAge(params: {
+    cutoffIso: string;
+    limit: number;
+  }): number {
+    if (params.limit <= 0) {
+      return 0;
+    }
+    const result = this.rootRuntimeDb()
+      .prepare(`
+        DELETE FROM turn_request_snapshots
+        WHERE rowid IN (
+          SELECT rowid FROM turn_request_snapshots
+          WHERE COALESCE(updated_at, created_at) < ?
+          ORDER BY rowid ASC
+          LIMIT ?
+        )
+      `)
+      .run(params.cutoffIso, params.limit);
+    return result.changes ?? 0;
+  }
+
+  /**
+   * Background-sweep primitive: delete the OLDEST snapshots, keeping the table
+   * at or under `keep` rows total.
+   *
+   * Oldest-first for the same reason as the event trim: a global cap means
+   * "keep the newest N overall", and evicting by session size would let a chatty
+   * session delete a quiet one's reusable template.
+   */
+  trimRootTurnRequestSnapshotsToTotal(params: {
+    keep: number;
+    limit: number;
+  }): number {
+    if (params.keep <= 0 || params.limit <= 0) {
+      return 0;
+    }
+    const total = this.countRootTurnRequestSnapshots();
+    const excess = total - params.keep;
+    if (excess <= 0) {
+      return 0;
+    }
+    const batch = Math.min(excess, params.limit);
+    const result = this.rootRuntimeDb()
+      .prepare(`
+        DELETE FROM turn_request_snapshots
+        WHERE rowid IN (
+          SELECT rowid FROM turn_request_snapshots ORDER BY rowid ASC LIMIT ?
         )
       `)
       .run(batch);

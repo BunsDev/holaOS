@@ -16,10 +16,56 @@ class FakeStore implements DbMaintenanceStore {
     // exactly what they measured before.
     maxTotalEvents: 0,
   };
+  // Off unless a test opts in, same reasoning as maxTotalEvents above.
+  turnRequestSnapshotRetentionPolicy = {
+    maxAgeDays: 0,
+    maxTotalSnapshots: 0,
+  };
   // sessionId -> array of event createdAt ISO strings (id order == array order).
   events = new Map<string, string[]>();
+  // Snapshot createdAt strings, oldest first — one entry per turn.
+  snapshots: string[] = [];
   compactionRequests = 0;
   failNextTrim = 0;
+
+  seedSnapshots(count: number, createdAt: string): void {
+    for (let i = 0; i < count; i++) {
+      this.snapshots.push(createdAt);
+    }
+  }
+
+  countRootTurnRequestSnapshots(): number {
+    return this.snapshots.length;
+  }
+
+  pruneRootTurnRequestSnapshotsByAge(params: {
+    cutoffIso: string;
+    limit: number;
+  }): number {
+    let deleted = 0;
+    while (
+      deleted < params.limit &&
+      this.snapshots.length > 0 &&
+      this.snapshots[0]! < params.cutoffIso
+    ) {
+      this.snapshots.shift();
+      deleted += 1;
+    }
+    return deleted;
+  }
+
+  trimRootTurnRequestSnapshotsToTotal(params: {
+    keep: number;
+    limit: number;
+  }): number {
+    const excess = this.snapshots.length - params.keep;
+    if (excess <= 0) {
+      return 0;
+    }
+    const batch = Math.min(excess, params.limit);
+    this.snapshots.splice(0, batch);
+    return batch;
+  }
 
   seed(sessionId: string, count: number, createdAt: string): void {
     const arr = this.events.get(sessionId) ?? [];
@@ -451,4 +497,60 @@ test("the ceiling trims oldest-first, so a quiet session keeps its recent histor
     30,
     "the older session absorbs the whole trim",
   );
+});
+
+
+test("the sweep prunes turn_request_snapshots by age", () => {
+  // This table was INSERT-only. At ~204KB a row it was the largest row class in
+  // the DB and the one unbounded axis left after output-event retention landed —
+  // a stress run put 3,000 turns at 1.8GB, ~612MB of it snapshots that nothing
+  // would ever reclaim.
+  const store = new FakeStore();
+  store.turnRequestSnapshotRetentionPolicy = {
+    maxAgeDays: 30,
+    maxTotalSnapshots: 0,
+  };
+  store.seedSnapshots(40, "2000-01-01T00:00:00.000Z");
+  store.seedSnapshots(10, new Date().toISOString());
+
+  return runRuntimeDbMaintenance({ store, batchSize: 7 }).then((result) => {
+    assert.equal(result.deletedSnapshots, 40);
+    assert.equal(store.countRootTurnRequestSnapshots(), 10, "recent ones stay");
+  });
+});
+
+test("the sweep enforces a global snapshot ceiling, oldest first", () => {
+  // Oldest-first matters: reusableTurnRequestSnapshotTemplate reuses a session's
+  // RECENT snapshots to skip rebuilding a request, so trimming newest-first
+  // would quietly cost a rebuild on every turn.
+  const store = new FakeStore();
+  store.turnRequestSnapshotRetentionPolicy = {
+    maxAgeDays: 0,
+    maxTotalSnapshots: 25,
+  };
+  const stamps = Array.from({ length: 60 }, (_, i) =>
+    new Date(Date.UTC(2030, 0, 1) + i * 86_400_000).toISOString(),
+  );
+  for (const stamp of stamps) {
+    store.seedSnapshots(1, stamp);
+  }
+
+  return runRuntimeDbMaintenance({ store, batchSize: 10 }).then((result) => {
+    assert.equal(result.deletedSnapshots, 35);
+    assert.equal(store.countRootTurnRequestSnapshots(), 25);
+    assert.deepEqual(
+      store.snapshots,
+      stamps.slice(35),
+      "the newest 25 survive, in order",
+    );
+  });
+});
+
+test("snapshot retention is off when the policy is zeroed", () => {
+  const store = new FakeStore();
+  store.seedSnapshots(50, "2000-01-01T00:00:00.000Z");
+  return runRuntimeDbMaintenance({ store }).then((result) => {
+    assert.equal(result.deletedSnapshots, 0);
+    assert.equal(store.countRootTurnRequestSnapshots(), 50);
+  });
 });

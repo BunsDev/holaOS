@@ -1,5 +1,8 @@
 import { setTimeout as sleep } from "node:timers/promises";
-import type { OutputEventRetentionPolicy } from "@holaboss/runtime-state-store";
+import type {
+  OutputEventRetentionPolicy,
+  TurnRequestSnapshotRetentionPolicy,
+} from "@holaboss/runtime-state-store";
 
 /**
  * Background maintenance for the runtime DB (`data.db`).
@@ -29,6 +32,18 @@ export interface DbMaintenanceStore {
     sessionId: string;
     maxEvents: number;
     limit?: number;
+  }): number;
+  // turn_request_snapshots — ~204KB/row, the largest row class in the DB, and
+  // INSERT-only until this sweep learned to prune it.
+  readonly turnRequestSnapshotRetentionPolicy: TurnRequestSnapshotRetentionPolicy;
+  countRootTurnRequestSnapshots(): number;
+  pruneRootTurnRequestSnapshotsByAge(params: {
+    cutoffIso: string;
+    limit: number;
+  }): number;
+  trimRootTurnRequestSnapshotsToTotal(params: {
+    keep: number;
+    limit: number;
   }): number;
   requestRootDbCompaction(): void;
 }
@@ -122,6 +137,8 @@ export interface DbMaintenanceResult {
   deletedByCap: number;
   /** Rows removed by the global ceiling, after the age + per-session phases. */
   deletedByTotalCap: number;
+  /** turn_request_snapshots removed by age or the global ceiling. */
+  deletedSnapshots: number;
   compactionRequested: boolean;
 }
 
@@ -162,6 +179,7 @@ export async function runRuntimeDbMaintenance(
     deletedByAge: 0,
     deletedByCap: 0,
     deletedByTotalCap: 0,
+    deletedSnapshots: 0,
     compactionRequested: false,
   };
 
@@ -368,15 +386,97 @@ export async function runRuntimeDbMaintenance(
     }
   }
 
+  // Phase 4 — turn_request_snapshots. Same two shapes as the event phases (age,
+  // then a global ceiling), on the table that had no retention at all.
+  //
+  // Deliberately NOT capped per session: `reusableTurnRequestSnapshotTemplate`
+  // scans a session's recent snapshots to reuse an already-built request, and
+  // the oldest-first global trim leaves an active session's window intact while
+  // reclaiming turns that could never serve as a template again.
+  const snapshotPolicy = store.turnRequestSnapshotRetentionPolicy;
+  if (snapshotPolicy && !signal?.aborted) {
+    if (snapshotPolicy.maxAgeDays > 0) {
+      const cutoffIso = new Date(
+        Date.now() - snapshotPolicy.maxAgeDays * 24 * 60 * 60 * 1000,
+      ).toISOString();
+      let consecutiveErrors = 0;
+      while (!signal?.aborted) {
+        let deleted = 0;
+        try {
+          deleted = store.pruneRootTurnRequestSnapshotsByAge({
+            cutoffIso,
+            limit: batchSize,
+          });
+          consecutiveErrors = 0;
+        } catch (error) {
+          if (!isTransientLock(error) || ++consecutiveErrors > MAX_CONSECUTIVE_ERRORS) {
+            logger?.error?.("db maintenance: snapshot age prune aborted", {
+              error: error instanceof Error ? error.message : String(error),
+            });
+            break;
+          }
+          if (!(await wait(pauseMs * consecutiveErrors))) {
+            break;
+          }
+          continue;
+        }
+        if (deleted === 0) {
+          break;
+        }
+        result.deletedSnapshots += deleted;
+        emitProgress("pruning", false);
+        if (!(await wait(pauseMs))) {
+          break;
+        }
+      }
+    }
+    if (snapshotPolicy.maxTotalSnapshots > 0 && !signal?.aborted) {
+      let consecutiveErrors = 0;
+      while (!signal?.aborted) {
+        let deleted = 0;
+        try {
+          deleted = store.trimRootTurnRequestSnapshotsToTotal({
+            keep: snapshotPolicy.maxTotalSnapshots,
+            limit: batchSize,
+          });
+          consecutiveErrors = 0;
+        } catch (error) {
+          if (!isTransientLock(error) || ++consecutiveErrors > MAX_CONSECUTIVE_ERRORS) {
+            logger?.error?.("db maintenance: snapshot cap trim aborted", {
+              error: error instanceof Error ? error.message : String(error),
+            });
+            break;
+          }
+          if (!(await wait(pauseMs * consecutiveErrors))) {
+            break;
+          }
+          continue;
+        }
+        if (deleted === 0) {
+          break;
+        }
+        result.deletedSnapshots += deleted;
+        emitProgress("pruning", false);
+        if (!(await wait(pauseMs))) {
+          break;
+        }
+      }
+    }
+  }
+
   result.aborted = Boolean(signal?.aborted);
 
   const totalDeleted =
-    result.deletedByAge + result.deletedByCap + result.deletedByTotalCap;
+    result.deletedByAge +
+    result.deletedByCap +
+    result.deletedByTotalCap +
+    result.deletedSnapshots;
   if (totalDeleted > 0) {
     logger?.info?.("db maintenance: output-event retention sweep complete", {
       deletedByAge: result.deletedByAge,
       deletedByCap: result.deletedByCap,
       deletedByTotalCap: result.deletedByTotalCap,
+      deletedSnapshots: result.deletedSnapshots,
       aborted: result.aborted,
     });
   }

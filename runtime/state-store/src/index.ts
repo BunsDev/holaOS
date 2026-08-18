@@ -50,6 +50,8 @@ export {
   type MemoryVerificationPolicy,
   type RuntimeStateStoreOptions,
   type OutputEventRetentionPolicy,
+  type TurnRequestSnapshotRetentionPolicy,
+  DEFAULT_TURN_REQUEST_SNAPSHOT_RETENTION,
   DEFAULT_OUTPUT_EVENT_RETENTION,
   type OutputEventRecord,
   type OutputFolderRecord,
