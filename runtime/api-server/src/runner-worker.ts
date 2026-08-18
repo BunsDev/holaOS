@@ -610,6 +610,10 @@ export async function executeRunnerRequest(
   let ttftFirstEventAtMs: number | null = null;
   let ttftRunStartedAtMs: number | null = null;
   let ttftBootstrapMs: number | null = null;
+  // Which harness path ran. Without this on the line, an A/B of the in-process
+  // flag cannot tell "the flag worked and saved little" from "the flag never
+  // took effect" — the two look identical in every other number.
+  let ttftHarnessInProcess: boolean | null = null;
   let ttftSessionSetupMs: number | null = null;
   let ttftSetupBreakdown: Record<string, unknown> | null = null;
   let ttftFirstTokenAtMs: number | null = null;
@@ -628,6 +632,10 @@ export async function executeRunnerRequest(
         ttftRunStartedAtMs = Date.now();
       }
       const payload = event.payload as Record<string, unknown> | undefined;
+      const inProcess = payload?.harness_in_process;
+      if (ttftHarnessInProcess === null && typeof inProcess === "boolean") {
+        ttftHarnessInProcess = inProcess;
+      }
       const bootstrap = payload?.bootstrap_total_ms;
       if (ttftBootstrapMs === null && typeof bootstrap === "number") {
         ttftBootstrapMs = bootstrap;
@@ -929,6 +937,7 @@ export async function executeRunnerRequest(
         `ts_runner_load_ms=${loadMs ?? "n/a"} ` +
         `bootstrap_ms=${ttftBootstrapMs ?? "n/a"} ` +
         `harness_load_ms=${harnessLoadMs ?? "n/a"} ` +
+        `in_process=${ttftHarnessInProcess === null ? "n/a" : String(ttftHarnessInProcess)} ` +
         `session_setup_ms=${ttftSessionSetupMs ?? "n/a"} ` +
         `model_ttft_ms=${modelTtftMs ?? "n/a"} ` +
         `total_ttft_ms=${totalMs ?? "n/a"} ` +

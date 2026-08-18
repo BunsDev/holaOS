@@ -2883,6 +2883,12 @@ export async function executeTsRunnerRequest(
     );
     runStartedPayload.bootstrap_ready_at = new Date().toISOString();
     runStartedPayload.bootstrap_total_ms = elapsedMs(bootstrapStartedAtMs);
+    // Which harness path this turn actually took. Travels on run_started
+    // because ts-runner's stderr is buffered and only surfaced on failure —
+    // a log line here is invisible on every successful turn, which is precisely
+    // the set you need to A/B. runner-worker puts it on the [ttft] line.
+    runStartedPayload.harness_in_process =
+      harnessInProcessEnabled() && bootstrap.harness === "pi";
     runStartedPayload.bootstrap_stage_timings_ms = {
       ...bootstrapStageTimingsMs,
     };
