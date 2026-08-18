@@ -3103,6 +3103,20 @@ async function defaultCreateSession(request: HarnessHostPiRequest): Promise<PiSe
   // composio_search_tools and composio_execute_tool. Those are the discovery and
   // long-tail-execution path — gating composio_search_tools cost a real turn
   // ("Tool not found", then two steps rediscovering it via describe_tool).
+  //
+  // Also NOT here, for the same reason one step further along the same chain:
+  // holaboss_workspace_integrations_propose_connect. It is the ACTION at the end
+  // of that discovery path — "can you use my notion?" runs list_catalog (native)
+  // -> composio_search_tools (native) -> propose_connect — and deferring only the
+  // last hop is what makes the sequence expensive. Observed live: with no schema
+  // in the prompt the model called it without the required toolkit_slug, got
+  // "toolkit_slug is required", and had to retry, while the user watched.
+  //
+  // It is also a UI-affordance tool: its result is what renders the Connect card
+  // on the canvas. Tools the interface depends on belong in the prompt — they
+  // fire on exactly the interactive turns where a wasted round trip is most
+  // visible, and their schemas are small (this whole admin group is ~4.1k tokens
+  // across ten tools, against composio's ~25.7k).
   const DEFERRABLE_ADMIN_TOOLS: Readonly<Record<string, string>> = {
     mcp_connect: "mcp_admin",
     mcp_refresh: "mcp_admin",
@@ -3110,7 +3124,6 @@ async function defaultCreateSession(request: HarnessHostPiRequest): Promise<PiSe
     capability_install: "workspace_admin",
     open_macos_settings: "workspace_admin",
     update_workspace_instructions: "workspace_admin",
-    holaboss_workspace_integrations_propose_connect: "integration_setup",
     holaboss_workspace_integrations_set_default_account: "integration_setup",
     cronjobs: "scheduling",
     terminal_session: "terminal",
