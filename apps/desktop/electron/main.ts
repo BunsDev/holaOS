@@ -70,31 +70,56 @@ function initialDesktopAppName(): string {
 electronApp.setName(initialDesktopAppName());
 
 
-// Swallow EPIPE on stdio writes — a benign teardown race that Electron
-// would otherwise surface as a "Holaboss encountered an error" modal.
-// Trigger: a child / utility process (or the embedded runtime) writes via
-// `console.info`/`.warn`/`.error` after its stdio pipe has been closed on
-// the parent side. Sentry's `consoleLoggingIntegration` above wraps those
-// console methods and re-invokes the real ones, so the EPIPE surfaces here
-// with a stack that ends in `sentry/core/build/cjs/instrument/console.js`
-// — not actually a Sentry bug, just an unhandled write to a half-closed
-// socket. Anything other than EPIPE we leave alone so the existing Sentry
-// + Electron handlers still see it.
-process.on("uncaughtException", (err: NodeJS.ErrnoException) => {
-  if (err?.code === "EPIPE") return;
-});
-
-// The handler above deliberately swallows EPIPE (and, historically, everything
-// else) without logging — which hides real main-process crashes. Log anything
-// non-EPIPE so failures (e.g. window teardown) are visible in the terminal.
-process.on("uncaughtException", (err: NodeJS.ErrnoException) => {
-  if (err?.code === "EPIPE") return;
+/**
+ * Main-process crash visibility.
+ *
+ * Registering an `uncaughtException` listener suppresses Electron's own error
+ * dialog and its non-zero exit, so whatever these handlers do IS the entire
+ * crash story. Previously that was a bare `console.error`, which a packaged
+ * app has nowhere to show: every production main-process crash was invisible,
+ * and the process carried on in a half-broken state.
+ *
+ * There is no crash reporter behind this. Earlier comments here described
+ * Sentry's `consoleLoggingIntegration` and "the existing Sentry + Electron
+ * handlers" as if they were catching the rest; no `@sentry/*` dependency has
+ * ever been in this package, `crashReporter` is never started, and the
+ * renderer registers no `onerror`. Those comments have been removed rather
+ * than left to reassure the next reader.
+ *
+ * So: mirror everything into runtime.log, which the diagnostics bundle
+ * already collects — that makes a packaged crash recoverable after the fact
+ * from a user's exported diagnostics instead of lost.
+ */
+function recordMainProcessCrash(kind: string, detail: unknown): void {
+  const text =
+    detail instanceof Error
+      ? (detail.stack ?? `${detail.name}: ${detail.message}`)
+      : String(detail);
   // eslint-disable-next-line no-console
-  console.error("[uncaughtException]", err);
+  console.error(`[${kind}]`, detail);
+  // Never let crash recording itself throw inside a crash handler. The try is
+  // not redundant with the .catch: appendRuntimeLog closes over module-scope
+  // state declared much further down this file, so a crash raised during early
+  // module evaluation would hit its temporal dead zone synchronously.
+  try {
+    void appendRuntimeLog(`[${kind}] ${text}`).catch(() => undefined);
+  } catch {
+    // Logging unavailable this early — the console.error above still stands.
+  }
+}
+
+// EPIPE on stdio writes is a benign teardown race that Electron would
+// otherwise surface as a "holaOS encountered an error" modal. Trigger: a
+// child / utility process (or the embedded runtime) writes via
+// `console.info`/`.warn`/`.error` after its stdio pipe has been closed on the
+// parent side. Suppressed silently and deliberately; everything else is
+// recorded.
+process.on("uncaughtException", (err: NodeJS.ErrnoException) => {
+  if (err?.code === "EPIPE") return;
+  recordMainProcessCrash("uncaughtException", err);
 });
 process.on("unhandledRejection", (reason) => {
-  // eslint-disable-next-line no-console
-  console.error("[unhandledRejection]", reason);
+  recordMainProcessCrash("unhandledRejection", reason);
 });
 
 import { electronClient } from "@better-auth/electron/client";
