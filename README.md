@@ -220,6 +220,11 @@ Use the local path when you are actively changing runtime code. Use the publishe
 Use `One-Line Install` when you want the fastest path to a working local desktop environment. Use `Manual Install` when you need to inspect or control each setup step yourself.
 
 
+## OSS Release Notes
+
+- License: modified Apache 2.0 with additional commercial-distribution and branding conditions. See [LICENSE](LICENSE).
+- Security issues: report privately to `admin@holaboss.ai`. See [SECURITY.md](SECURITY.md).
+
 ## Star History
 
 <a href="https://www.star-history.com/?repos=holaOS%2FholaOS%2Cholaboss-ai%2FholaOS&type=date&legend=top-left">
@@ -229,7 +234,3 @@ Use `One-Line Install` when you want the fastest path to a working local desktop
    <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=holaOS/holaOS%2Cholaboss-ai/holaOS&type=date&legend=top-left&sealed_token=naYulQVgfGv2-hZ5DnjpjHWryU8IXIBLRA8zegCvdwUdNyn71iusyOJidnIBuX1nptJsR1uGOuRMXuVCJjGsXkHN2g4R66KDgaN49lZ1OgCDTarbtfX4pa_AvzlUyqTz5cN6cRhPHs0E0KW_YrBFGcubJ-DZlTqQRXDRWjflT6qCteCSpAfNwG9Rml-R" />
  </picture>
 </a>
-## OSS Release Notes
-
-- License: modified Apache 2.0 with additional commercial-distribution and branding conditions. See [LICENSE](LICENSE).
-- Security issues: report privately to `admin@holaboss.ai`. See [SECURITY.md](SECURITY.md).
