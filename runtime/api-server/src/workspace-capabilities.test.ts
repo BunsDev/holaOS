@@ -444,7 +444,9 @@ test("import-plugin: throws when there is no plugin manifest", async () => {
   const { store, root } = makeStore();
   const workspaceDir = path.join(root, "workspace", "ws-import-2");
   const emptyDir = makeTempDir("hb-plugin-empty-");
-  assert.throws(
+  // importPluginAsCapability is async, so the rejection has to be awaited —
+  // assert.throws() on the un-awaited call can never observe it.
+  await assert.rejects(
     () =>
       importPluginAsCapability({
         store,

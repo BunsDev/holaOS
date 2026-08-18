@@ -479,11 +479,23 @@ export function listWorkspaceApplications(workspaceDir: string): Array<Record<st
   return Array.isArray(document.applications) ? document.applications.filter(isRecord) : [];
 }
 
+/**
+ * Every MCP server name in the workspace registry, across BOTH sections.
+ *
+ * App-owned servers live in `mcp_registry.app_servers`, and
+ * `writeWorkspaceMcpRegistryEntry` deliberately drops the legacy `servers` copy
+ * when it writes one. Reading only `servers` therefore made every
+ * app-container server invisible here — which silently broke the
+ * new-server diff that drives `requires_session_refresh`: installing an app
+ * never flagged the session, so the agent kept running without the app's tools
+ * until something else forced a refresh.
+ */
 export function readWorkspaceMcpRegistryServerNames(workspaceDir: string): Set<string> {
   const document = readWorkspaceYamlDocument(workspaceDir);
   const registry = isRecord(document.mcp_registry) ? document.mcp_registry : {};
   const servers = isRecord(registry.servers) ? registry.servers : {};
-  return new Set(Object.keys(servers));
+  const appServers = isRecord(registry.app_servers) ? registry.app_servers : {};
+  return new Set([...Object.keys(servers), ...Object.keys(appServers)]);
 }
 
 export interface WorkspaceMcpServerSummary {

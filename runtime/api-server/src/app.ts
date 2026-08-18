@@ -7624,7 +7624,9 @@ export function buildRuntimeApiServer(options: BuildRuntimeApiServerOptions = {}
     async (request, reply) => {
       const body = isRecord(request.body) ? request.body : {};
       try {
-        return runtimeAgentToolsService.listIntegrationCatalog({
+        // `await` — see the capability-install route: an un-awaited return of
+        // an async call rejects past its own try, leaving this catch dead.
+        return await runtimeAgentToolsService.listIntegrationCatalog({
           workspaceId: requiredCapabilityWorkspaceId({
             headers: request.headers as Record<string, unknown>,
             body,
@@ -8117,7 +8119,11 @@ export function buildRuntimeApiServer(options: BuildRuntimeApiServerOptions = {}
       return sendError(reply, 400, "request body must be an object");
     }
     try {
-      return runtimeAgentToolsService.installCapability({
+      // `await`, not a bare return: installCapability is async, so without it
+      // its rejections escape this try and the catch below is dead code — the
+      // mapped {detail} error body silently became the generic error-handler
+      // shape for every failure this route can produce.
+      return await runtimeAgentToolsService.installCapability({
         workspaceId: requiredCapabilityWorkspaceId({
           headers: request.headers as Record<string, unknown>,
           body: request.body
@@ -12050,7 +12056,10 @@ export function buildRuntimeApiServer(options: BuildRuntimeApiServerOptions = {}
       if (!capability) {
         return reply.code(404).send({ error: "capability not found" });
       }
-      const result = installCapability({
+      // installCapability is async: without the await this replied with a
+      // pending promise, which serializes to `{}` — and responded before the
+      // install had actually finished.
+      const result = await installCapability({
         store,
         workspaceId,
         workspaceDir: store.workspaceDir(workspaceId),
