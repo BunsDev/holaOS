@@ -7292,6 +7292,20 @@ export function ChatPane({
       detail: `workspace=${selectedWorkspace.id}`,
     });
 
+    // Captured before the composer is cleared below. The clear happens
+    // optimistically, ahead of the network call, so without this a failed send
+    // destroyed whatever the user had typed and staged.
+    const composerSnapshot = {
+      text,
+      skillIds: quotedSkillIds,
+      capabilityIds: quotedCapabilityIds,
+      integrationSlugs: quotedIntegrationSlugs,
+      attachments: pendingAttachments,
+    };
+    // Once the runtime has accepted the input the turn exists and will run, so
+    // the composer must NOT be repopulated — that would invite a duplicate send.
+    let queueAccepted = false;
+
     try {
       const missingQuotedSkillIds = quotedSkillIds.filter(
         (skillId) => !availableWorkspaceSkillMap.has(skillId),
@@ -7524,6 +7538,7 @@ export function ChatPane({
         model: dispatchedChatModel,
         thinking_value: dispatchedThinkingValue,
       });
+      queueAccepted = true;
       rememberSubmittedComposerInput(text, selectedWorkspace.id);
       setActiveSession(queued.session_id);
       appendStreamTelemetry({
@@ -7684,7 +7699,45 @@ export function ChatPane({
         });
       }
     } catch (error) {
-      if (!queueOntoActiveRun && optimisticUserMessageId) {
+      if (!queueAccepted) {
+        // Nothing was queued, so put the user's message back rather than
+        // making them retype it and re-attach their files.
+        //
+        // But the composer was cleared optimistically and this failure can
+        // land seconds later — long enough for someone watching a hung send
+        // to start typing again. Overwriting THAT is the same data loss in
+        // the other direction, so the live draft wins and the failed text
+        // becomes recallable (⌥↑) instead of being restored over it.
+        const composerStillEmpty =
+          composerEditorRef.current?.isEmpty() !== false;
+        if (composerStillEmpty) {
+          setInput(composerSnapshot.text);
+          setQuotedSkillIds(composerSnapshot.skillIds);
+          setQuotedCapabilityIds(composerSnapshot.capabilityIds);
+          setQuotedIntegrationSlugs(composerSnapshot.integrationSlugs);
+          composerEditorRef.current?.setContent({
+            text: composerSnapshot.text,
+            skillIds: composerSnapshot.skillIds,
+            capabilityIds: composerSnapshot.capabilityIds,
+          });
+        } else {
+          rememberSubmittedComposerInput(
+            composerSnapshot.text,
+            selectedWorkspace.id,
+          );
+        }
+        // Attachments restore independently of the text: re-staging files
+        // cannot overwrite anything typed, and dropping them would mean
+        // re-dragging every one.
+        setPendingAttachments((current) =>
+          current.length === 0 ? composerSnapshot.attachments : current,
+        );
+      }
+      // Only retract the optimistic bubble when nothing was queued. Past that
+      // point the runtime has the input and the turn will run, so removing it
+      // showed the user their message vanishing from a conversation the agent
+      // was already answering -- and invited them to send it twice.
+      if (!queueAccepted && !queueOntoActiveRun && optimisticUserMessageId) {
         setMessages((prev) =>
           prev.filter((message) => message.id !== optimisticUserMessageId),
         );
