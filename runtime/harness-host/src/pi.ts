@@ -3117,10 +3117,14 @@ async function defaultCreateSession(request: HarnessHostPiRequest): Promise<PiSe
   // fire on exactly the interactive turns where a wasted round trip is most
   // visible, and their schemas are small (this whole admin group is ~4.1k tokens
   // across ten tools, against composio's ~25.7k).
+  //
+  // mcp_connect and mcp_reauthorize are native for the same reason: their
+  // results render the Authorize card (see the desktop's
+  // mcpAuthorizationsFromToolResult, which keys on exactly those two names).
+  // mcp_refresh stays deferred — it renders nothing, and if a repair needs it
+  // the gateway reaches it fine.
   const DEFERRABLE_ADMIN_TOOLS: Readonly<Record<string, string>> = {
-    mcp_connect: "mcp_admin",
     mcp_refresh: "mcp_admin",
-    mcp_reauthorize: "mcp_admin",
     capability_install: "workspace_admin",
     open_macos_settings: "workspace_admin",
     update_workspace_instructions: "workspace_admin",

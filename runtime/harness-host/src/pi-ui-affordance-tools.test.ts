@@ -15,6 +15,17 @@ function deferrableAdminBlock(): string {
   return piSource.slice(start, end);
 }
 
+/** Tools whose RESULT renders something on the canvas. Each is matched by name
+ *  in a desktop card parser, so deferring one means the card silently never
+ *  appears on the turn that produced it. */
+const UI_AFFORDANCE_TOOLS = [
+  // -> Connect card (proposedIntegrationsFromToolResult)
+  "holaboss_workspace_integrations_propose_connect",
+  // -> Authorize card (mcpAuthorizationsFromToolResult)
+  "mcp_connect",
+  "mcp_reauthorize",
+];
+
 test("tools the interface depends on are not deferred", () => {
   // propose_connect's RESULT is what renders the Connect card on the canvas, and
   // it is the action at the end of the integration discovery chain:
@@ -28,11 +39,14 @@ test("tools the interface depends on are not deferred", () => {
   //
   // The schema is cheap: the whole admin group is ~4.1k tokens across ten tools,
   // against composio's ~25.7k. There is no budget argument for deferring it.
-  assert.doesNotMatch(
-    deferrableAdminBlock(),
-    /holaboss_workspace_integrations_propose_connect/,
-    "propose_connect drives a canvas card and must stay in the prompt",
-  );
+  const block = deferrableAdminBlock();
+  for (const name of UI_AFFORDANCE_TOOLS) {
+    assert.doesNotMatch(
+      block,
+      new RegExp(`\\b${name}\\b`),
+      `${name} drives a canvas card and must stay in the prompt`,
+    );
+  }
 });
 
 test("the genuinely rare admin tools are still deferred", () => {
@@ -41,10 +55,13 @@ test("the genuinely rare admin tools are still deferred", () => {
   // the ~4.1k tokens back.
   const block = deferrableAdminBlock();
   for (const name of [
-    "mcp_connect",
+    // Renders nothing itself; a repair that needs it reaches it via the gateway.
     "mcp_refresh",
-    "mcp_reauthorize",
+    // Verified against the desktop: capability_install feeds no card — the
+    // ApiKeyInstallGate comes from activeWebAppSurface, not a tool result — and
+    // set_default_account feeds nothing either. Both are correctly deferred.
     "capability_install",
+    "holaboss_workspace_integrations_set_default_account",
     "open_macos_settings",
     "update_workspace_instructions",
   ]) {
