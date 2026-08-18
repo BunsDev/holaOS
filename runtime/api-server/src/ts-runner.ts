@@ -1856,10 +1856,38 @@ function installInProcessTerminationGuard(logger: LoggerLike): void {
   }
 }
 
+/**
+ * In-process pi is the DEFAULT. `HB_HARNESS_IN_PROCESS=0` returns to spawning
+ * harness-host.
+ *
+ * Flipped on measured evidence, per the plan's gate — an A/B of the
+ * authoritative [ttft] line on one machine:
+ *
+ *   harness_load   median 1335ms -> 787ms   (settles ~775ms once warm)
+ *   fixed init     median 2492ms -> 1251ms
+ *   ts_runner_load          253ms -> 223ms  (did NOT grow, contra the plan's
+ *                                            prediction: the import is dynamic
+ *                                            and lands inside the turn)
+ *
+ * Resume was verified separately, since blockers 2 and 7 both risked the
+ * harness session id: four consecutive in-process turns accumulated into a
+ * single pi session file with the state pointer tracking it, rather than
+ * forking a fresh session per turn.
+ *
+ * Residual risk, stated rather than hidden: post-terminal compaction (blocker
+ * 4) is handled by deferring SIGTERM while a turn is in flight, but that path
+ * only fires on long sessions crossing the compaction threshold and has not
+ * been observed live. If long sessions stop shrinking, this flag is the first
+ * thing to turn off.
+ */
 export function harnessInProcessEnabled(
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
-  return (env.HB_HARNESS_IN_PROCESS ?? "").trim() === "1";
+  const raw = (env.HB_HARNESS_IN_PROCESS ?? "").trim().toLowerCase();
+  if (!raw) {
+    return true;
+  }
+  return raw !== "0" && raw !== "false" && raw !== "off";
 }
 
 const inProcessRunHarnessHost: TsRunnerExecutionDeps["runHarnessHost"] = async (

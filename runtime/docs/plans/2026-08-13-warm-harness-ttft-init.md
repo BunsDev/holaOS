@@ -173,7 +173,7 @@ tracked separately); changing the pi brain or the event contract.
 |---|---|---|---|---|
 | ~~0~~ | ~~Verify the composio cache is hitting~~ | ~~`session_setup`~~ | **DONE 2026-08-18** — it hits; ~675 ms already gone every turn | — |
 | ~~0b~~ | ~~Wire `clearComposioInlineCache` into the connect/install flows, then raise the TTL~~ | ~~bootstrap's composio fetch~~ | **DONE 2026-08-18** — hook wired at 3 call sites (`integration-broker.ts`, `integrations.ts` ×2), TTL 120 s → 15 min. Confirmed live below: `composio_inline` is now **1–3 ms** and `session_setup` **38–52 ms** | — |
-| **1** | Run pi **in-process** of ts-runner (collapse the double spawn) | 2nd Node boot | ~0.8–1.1 s target, **every turn** | **IMPLEMENTED 2026-08-19, flag-off — awaiting the A/B below.** All 6 blockers handled + a 7th found (see below) |
+| ~~1~~ | ~~Run pi in-process of ts-runner (collapse the double spawn)~~ | ~~2nd Node boot~~ | **SHIPPED 2026-08-19, now the DEFAULT.** Measured: `harness_load` 1335 ms → 787 ms median, fixed init 2492 ms → 1251 ms | — |
 | ~~2~~ | ~~**Warm harness pool**~~ — **SHELVED**, see below | `harness_load` + residual `session_setup` | ~1.1 s, and Phase 1 already claims that | **High**, for a win Phase 1 gets more cheaply |
 | 3 | Lift warm lookup into api-server (skip per-turn ts-runner spawn too) | `ts_runner_load` + most `bootstrap` | ~1.2 s more, turns 2+ | High — bootstrap/compile currently lives in ts-runner |
 
@@ -738,3 +738,43 @@ tree-sitter now load in ts-runner). **The win is the difference, not the
 `harness_load` figure** — the module graph still has to load, it just no longer
 needs a second process boot to do it. If the delta is not clearly positive,
 this stays off.
+
+## Phase 1 gate — passed, default flipped 2026-08-19
+
+The plan required an A/B of the authoritative `[ttft]` line before flipping.
+Run on one machine, 7 spawn turns against 5 in-process:
+
+| Phase | spawn | in-process | delta |
+|---|---|---|---|
+| `ts_runner_load` | 253 ms | 223 ms | −30 |
+| `bootstrap` | 287 ms | 204 ms | −83 |
+| **`harness_load`** | **1,335 ms** | **787 ms** | **−548** |
+| `session_setup` | 50 ms | 47 ms | −3 |
+| **fixed init (ours)** | **2,492 ms** | **1,251 ms** | **−1,241** |
+
+Three honest qualifications:
+
+1. **`ts_runner_load` did NOT grow.** The plan predicted it would, since pi now
+   loads in ts-runner. It does not, because the import is dynamic and happens
+   inside the turn — so the cost lands in `harness_load` and the saving reads
+   cleanly there instead of being shuffled between two columns.
+2. **The first two in-process turns were warm-up** — 1350, 1261, then 762, 787,
+   774. Steady state is ~775 ms; a cold app still pays roughly the spawn cost on
+   its first turn or two.
+3. **Do not read `total_ttft` −1,870 ms as the win.** `model_ttft` also fell
+   315 ms between the samples and that is the provider, not us. The defensible
+   claim is ~1.2 s off our fixed init.
+
+**Resume verified separately**, because blockers 2 and 7 both put the harness
+session id at risk and losing a conversation is worse than a slow boot: four
+consecutive in-process turns accumulated into ONE pi session file (137,902 bytes)
+with the state pointer tracking it, rather than forking a fresh session per turn.
+
+**Residual risk, un-observed:** post-terminal compaction (blocker 4). The SIGTERM
+deferral is implemented and unit-tested, but it only fires on a session crossing
+the compaction threshold and has not been seen live. If long sessions stop
+shrinking, `HB_HARNESS_IN_PROCESS=0` is the rollback.
+
+**Next lever is 3** (stop spawning ts-runner per turn, ~250 ms + most of
+bootstrap), but note the ceiling: `model_ttft` is ~3.2 s of a ~4.4 s wait now, so
+our remaining share is ~1.25 s. There is not much left worth high-risk surgery.
