@@ -219,6 +219,7 @@ import {
   normalizeErrorMessage,
   turnInputIdsFromHistoryMessages,
 } from "./helpers";
+import { bareRuntimeToolName, effectiveToolName } from "./toolNames";
 import {
   preserveCommittedAssistantTurns,
   settleCommittedAssistantTurns,
@@ -2752,13 +2753,7 @@ const PENDING_INTEGRATION_TOOL_NAMES = new Set([
  * them as `mcp__<server>__<tool>`. Tool-name checks below must match either
  * form, else features like the Connect card silently break for those harnesses.
  */
-function bareRuntimeToolName(name: string): string {
-  const trimmed = name.trim();
-  if (!trimmed.startsWith("mcp__")) return trimmed;
-  const afterPrefix = trimmed.slice("mcp__".length);
-  const separator = afterPrefix.indexOf("__");
-  return separator === -1 ? afterPrefix : afterPrefix.slice(separator + 2);
-}
+
 
 /**
  * Deep-search a tool-call result for the first item an `extract` fn accepts.
@@ -2837,9 +2832,7 @@ function parseProposedIntegration(
 function proposedIntegrationsFromToolResult(
   payload: Record<string, unknown>,
 ): ChatProposedIntegration[] {
-  const toolName = bareRuntimeToolName(
-    typeof payload.tool_name === "string" ? payload.tool_name : "",
-  );
+  const toolName = effectiveToolName(payload);
   if (toolName !== "holaboss_workspace_integrations_propose_connect") return [];
   const phase =
     typeof payload.phase === "string" ? payload.phase.trim().toLowerCase() : "";
@@ -2859,9 +2852,7 @@ function proposedIntegrationsFromToolResult(
 function mcpAuthorizationsFromToolResult(
   payload: Record<string, unknown>,
 ): ChatMcpAuthorization[] {
-  const toolName = bareRuntimeToolName(
-    typeof payload.tool_name === "string" ? payload.tool_name : "",
-  );
+  const toolName = effectiveToolName(payload);
   // mcp_connect surfaces a first-time Authorize card; mcp_reauthorize surfaces a
   // "switch account" card. Both carry `auth_required` + `server_id`; the latter
   // also sets `reauthorize`.
@@ -2890,10 +2881,9 @@ function mcpAuthorizationsFromToolResult(
 function publishedHubPostFromToolResult(
   payload: Record<string, unknown>,
 ): ChatPublishedHubPost | null {
-  const toolName =
-    typeof payload.tool_name === "string"
-      ? payload.tool_name.trim().toLowerCase()
-      : "";
+  // Same wrapper unwrapping as the other card parsers — a post published via
+  // `call_tool` would otherwise never offer the jump into Discover.
+  const toolName = effectiveToolName(payload).toLowerCase();
   const phase =
     typeof payload.phase === "string" ? payload.phase.trim().toLowerCase() : "";
   if (phase !== "completed" || payload.error === true) {
@@ -2916,9 +2906,7 @@ function publishedHubPostFromToolResult(
 function pendingIntegrationsFromToolResult(
   payload: Record<string, unknown>,
 ): ChatPendingIntegration[] {
-  const toolName = bareRuntimeToolName(
-    typeof payload.tool_name === "string" ? payload.tool_name : "",
-  );
+  const toolName = effectiveToolName(payload);
   if (!PENDING_INTEGRATION_TOOL_NAMES.has(toolName)) {
     return [];
   }
