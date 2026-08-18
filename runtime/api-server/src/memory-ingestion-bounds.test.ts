@@ -50,7 +50,7 @@ const WIN_TOOL_RESULT_DIR = [
 function toolResultOutput(name: string, sep: "win" | "posix"): Record<string, unknown> {
   const filePath = sep === "win"
     ? `${WIN_TOOL_RESULT_DIR}\\${name}`
-    : `/holaboss/workspace/outputs/.tool-results/${name}`;
+    : `/holaboss/workspace/tmp/.tool-results/${name}`;
   return { id: name, title: name, status: "active", filePath };
 }
 

@@ -4979,7 +4979,7 @@ test("wrapToolWithOutputCap passes small tool results through unchanged", async 
   }
 });
 
-test("wrapToolWithOutputCap writes oversized results to outputs/.tool-results and replaces inline content with a stub", async () => {
+test("wrapToolWithOutputCap writes oversized results to tmp/.tool-results and replaces inline content with a stub", async () => {
   const previousMax = process.env.HOLABOSS_MAX_TOOL_OUTPUT_BYTES;
   process.env.HOLABOSS_MAX_TOOL_OUTPUT_BYTES = "1024";
   const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), "hb-tool-cap-trunc-"));
@@ -5004,9 +5004,9 @@ test("wrapToolWithOutputCap writes oversized results to outputs/.tool-results an
     // A text payload is offloaded verbatim as .txt (not the result envelope) so
     // `read` returns directly usable content, and the stub carries a head
     // preview so the agent usually needn't open the file at all.
-    assert.match(actual.content[0].text, /outputs\/\.tool-results\/gmail_fetch_emails_-call_overflow\.txt/);
+    assert.match(actual.content[0].text, /tmp\/\.tool-results\/gmail_fetch_emails_-call_overflow\.txt/);
     assert.match(actual.content[0].text, /--- first .*KB of .*KB ---/);
-    const overflowPath = path.join(workspaceDir, "outputs", ".tool-results", "gmail_fetch_emails_-call_overflow.txt");
+    const overflowPath = path.join(workspaceDir, "tmp", ".tool-results", "gmail_fetch_emails_-call_overflow.txt");
     assert.equal(fs.existsSync(overflowPath), true);
     const persisted = fs.readFileSync(overflowPath, "utf8");
     assert.equal(persisted, `${largeText}\ntrailing fragment`);

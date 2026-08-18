@@ -1756,7 +1756,13 @@ function wrapToolWithSkillWidening<TTool extends { name: string; execute: (...ar
 }
 
 const DEFAULT_MAX_TOOL_OUTPUT_BYTES = 50 * 1024; // 50KB — matches pi-coding-agent's read tool default.
-const TOOL_OUTPUT_OVERFLOW_DIR = path.join("outputs", ".tool-results");
+// Under tmp/, NOT outputs/. Anything under outputs/ is a workspace artifact and
+// surfaces as a card in the conversation — so a capped tool result showed up
+// beside the answer as "composio_execute_tool-call_86….TXT", which is scratch
+// space presented as a deliverable. It is still fully readable by the agent at
+// the path named in the truncation notice; it just is not a result the user
+// asked for.
+const TOOL_OUTPUT_OVERFLOW_DIR = path.join("tmp", ".tool-results");
 const SAFE_TOOL_NAME_PART_REGEXP = /[^a-zA-Z0-9._-]+/g;
 
 // Once a run has already inlined this many bytes of tool output, the per-call
@@ -1794,7 +1800,7 @@ export function createToolOutputCapState(): ToolOutputCapState {
 /**
  * Per-call output ceiling. Starts at the full per-call cap; once the run has
  * already inlined more than the session budget, it tightens so further large
- * results are offloaded (to outputs/.tool-results — fully retrievable via
+ * results are offloaded (to tmp/.tool-results — fully retrievable via
  * `read`) rather than accumulated. Recent/early reads stay verbatim; nothing is
  * discarded, only relocated once the context is already carrying a lot.
  */
@@ -1916,9 +1922,9 @@ function safeToolFilenamePart(value: string): string {
 
 function writeToolOverflowFile(params: {
   /**
-   * Root dir under which `outputs/.tool-results/<file>.json` is written.
+   * Root dir under which `tmp/.tool-results/<file>.json` is written.
    * Must be the agent's cwd, NOT the workspace runtime dir — the stub the
-   * agent sees in its tool output is a `./outputs/.tool-results/<file>`
+   * agent sees in its tool output is a `./tmp/.tool-results/<file>`
    * relative path, and the agent resolves it from its cwd. Writing to
    * workspace_dir would mean project-bound agents see a stub path that
    * doesn't exist from their actual cwd.
@@ -2016,7 +2022,7 @@ export function wrapToolWithImageDownscale<
 
 /**
  * Cap any single tool result that exceeds maxToolOutputBytes(). The full result
- * is written to outputs/.tool-results/<tool>-<call_id>.json (relative to the
+ * is written to tmp/.tool-results/<tool>-<call_id>.json (relative to the
  * workspace) and the inline content is replaced with a short stub pointing the
  * agent at that file. Defends the conversation context against any tool —
  * including third-party MCP integrations — that returns unexpectedly large

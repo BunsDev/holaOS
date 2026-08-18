@@ -5540,11 +5540,16 @@ export async function persistTurnInputAttachmentsAsDocuments(params: {
 
 /**
  * Path segment the harness offloads capped tool results to
- * (`outputs/.tool-results/<tool>-<call_id>.json`, TOOL_OUTPUT_OVERFLOW_DIR in
+ * (`tmp/.tool-results/<tool>-<call_id>.json`, TOOL_OUTPUT_OVERFLOW_DIR in
  * harness-host/pi.ts). Kept as a literal rather than imported: api-server does
  * not depend on harness-host, and this is a stable on-disk layout.
  */
-const TOOL_RESULT_OUTPUT_DIR_SEGMENT = "outputs/.tool-results/";
+const TOOL_RESULT_OUTPUT_DIR_SEGMENTS = [
+  "tmp/.tool-results/",
+  // Pre-existing workspaces still have spills under outputs/; keep excluding
+  // them from semantic memory or an upgrade would re-import old junk.
+  "outputs/.tool-results/",
+];
 
 /**
  * Tool results are transcript/evidence, not durable semantic knowledge — the
@@ -5563,7 +5568,9 @@ const TOOL_RESULT_OUTPUT_DIR_SEGMENT = "outputs/.tool-results/";
  */
 function isToolResultOutput(output: { filePath?: string | null }): boolean {
   const normalized = (output.filePath ?? "").replace(/\\/g, "/");
-  return normalized.includes(TOOL_RESULT_OUTPUT_DIR_SEGMENT);
+  return TOOL_RESULT_OUTPUT_DIR_SEGMENTS.some((segment) =>
+    normalized.includes(segment),
+  );
 }
 
 export async function persistTurnOutputArtifactsAsDocuments(params: {

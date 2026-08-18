@@ -240,7 +240,36 @@ function buildComposioMetaTools(ctx: {
         tools?: unknown;
         connected_toolkits?: unknown;
         tool_count?: unknown;
+        detail?: unknown;
       };
+      // A FAILED search must not read as a successful empty one.
+      //
+      // requestCapabilityJson resolves for non-2xx (it never throws), and an
+      // error body carries `detail`, not `tools` — so serializing it produced
+      // `{"tools": [], "connected_toolkits": []}`, which is indistinguishable
+      // from "nothing matched". Observed live: a Notion search failed while the
+      // upstream was returning 502s, the agent read it as "no such tool",
+      // listed the entire toolkit catalogue instead, and spent 51.8s reading it.
+      //
+      // composio_execute_tool already surfaces failures with a
+      // [composio_error:...] marker, which is why its 502s were visible in the
+      // same trace. Search now follows that convention.
+      if (!response.ok) {
+        const detail =
+          typeof payload.detail === "string" && payload.detail.trim()
+            ? payload.detail.trim()
+            : `composio-search failed (status ${response.status})`;
+        const scope = toolkitSlug ? `:${toolkitSlug}` : "";
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `[composio_error:search_failed${scope}] ${detail}\nThe search did NOT run — this is not "no matching tools". Retry, or list the toolkit's catalogue with only toolkit_slug.`,
+            },
+          ],
+          details: { tool_id: "composio_search_tools", ok: false },
+        };
+      }
       const text = serializeComposioPayload({
         tools: payload.tools ?? [],
         connected_toolkits: payload.connected_toolkits ?? [],
