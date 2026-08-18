@@ -8498,11 +8498,16 @@ async function getAuthenticatedUser(): Promise<AuthUserPayload | null> {
   const startedAt = Date.now();
   let response: Response;
   try {
+    // Bounded deliberately: RequireAuth holds the entire shell on this
+    // promise, so an unanswered request here is a permanent boot splash with
+    // no error path — a captive portal or a slow api host, not just an
+    // offline one. Failing is recoverable; hanging is not.
     response = await fetch(`${AUTH_BASE_URL}/api/auth/get-session`, {
       method: "GET",
       headers: {
         Cookie: cookieHeader,
       },
+      signal: AbortSignal.timeout(MAIN_FETCH_TIMEOUT_MS),
     });
   } catch (error) {
     logBffFetch({
@@ -9530,20 +9535,53 @@ function isTransientFetchError(err: unknown): boolean {
 }
 
 /**
- * Wraps fetch with a single retry against transient network errors.
+ * Ceiling on any main-process request/response fetch.
+ *
+ * Node's fetch has no default timeout, so a backend that accepts the TCP
+ * connection but never answers — the common hung-upstream failure, as opposed
+ * to a refusal, which fails fast — leaves the renderer's promise pending for
+ * undici's 300s headersTimeout. That surfaces as a spinner that never resolves
+ * and never errors. 20s is well above any healthy call here and well below the
+ * point where a user has concluded the app is broken.
+ */
+const MAIN_FETCH_TIMEOUT_MS = 20_000;
+
+/**
+ * Wraps fetch with a single retry against transient network errors, under a
+ * bounded timeout.
+ *
  * Backoff is short (200ms) because keep-alive socket races resolve as
  * soon as a fresh connection is opened. Auth/HTTP-level failures (4xx,
  * 5xx) are returned untouched — those go through retryAfterSessionAuth.
+ *
+ * A caller-supplied signal still wins: it is combined with the timeout rather
+ * than replaced, so an explicit shorter deadline (or a cancellation) is
+ * honoured. Timeouts are not retried — `isTransientFetchError` only matches
+ * TypeErrors from undici, and an abort raises TimeoutError — so a stalled
+ * upstream costs one timeout, not two.
  */
 async function fetchWithNetworkRetry(
   ...args: Parameters<typeof fetch>
 ): Promise<Response> {
+  const [input, init] = args;
+  const callerSignal = init?.signal ?? null;
+  // Built per attempt: reusing one signal would hand the retry an
+  // already-aborted deadline.
+  const initWithDeadline = (): RequestInit => {
+    const timeoutSignal = AbortSignal.timeout(MAIN_FETCH_TIMEOUT_MS);
+    return {
+      ...init,
+      signal: callerSignal
+        ? AbortSignal.any([callerSignal, timeoutSignal])
+        : timeoutSignal,
+    };
+  };
   try {
-    return await fetch(...args);
+    return await fetch(input, initWithDeadline());
   } catch (err) {
     if (!isTransientFetchError(err)) throw err;
     await new Promise((resolve) => setTimeout(resolve, 200));
-    return fetch(...args);
+    return fetch(input, initWithDeadline());
   }
 }
 
@@ -29123,6 +29161,10 @@ app.whenReady().then(async () => {
         const res = await fetch(url, {
           method: "GET",
           headers: cookie ? { Cookie: cookie } : undefined,
+          // This runs while the user types a name. The fallback below is the
+          // intended behaviour on a bad backend, but without a deadline it was
+          // unreachable for undici's full 300s.
+          signal: AbortSignal.timeout(5_000),
         });
         if (!res.ok) {
           // Endpoint not ready — fall back to "available" so UI doesn't block.
