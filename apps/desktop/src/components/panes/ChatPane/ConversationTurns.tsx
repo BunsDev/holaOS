@@ -1,5 +1,9 @@
-  import { Fragment, type ReactNode } from "react";
+  import { Fragment, type ReactNode, useMemo } from "react";
 import { AssistantTurn } from "./AssistantTurn";
+import {
+  dedupePendingIntegrationsByIndex,
+  NO_PENDING_INTEGRATIONS,
+} from "./pendingIntegrationDedupe";
 import { UserTurn } from "./UserTurn";
 import type {
   AttachmentListItem,
@@ -14,6 +18,21 @@ import type {
 // arrived — so break the group and re-show the avatar + timestamp once the gap
 // from the previous message crosses this threshold.
 const ASSISTANT_GROUP_BREAK_MS = 60_000;
+
+/**
+ * Shared empty arrays for absent optional message fields.
+ *
+ * AssistantTurn is memoized on a comparator that compares these props by
+ * reference, so a fresh `[]` literal per render defeats the memo for every
+ * message that simply does not have that field.
+ */
+const NO_SEGMENTS: NonNullable<ChatMessage["segments"]> = [];
+const NO_EXECUTION_ITEMS: NonNullable<ChatMessage["executionItems"]> = [];
+const NO_OUTPUTS: NonNullable<ChatMessage["outputs"]> = [];
+const NO_PROPOSED_INTEGRATIONS: NonNullable<ChatMessage["proposedIntegrations"]> = [];
+const NO_MCP_AUTHORIZATIONS: NonNullable<ChatMessage["mcpAuthorizations"]> = [];
+const NO_PUBLISHED_POSTS: NonNullable<ChatMessage["publishedPosts"]> = [];
+const NO_BACKGROUND_TASK_REFERENCES: ChatBackgroundTaskReference[] = [];
 
 export function ConversationTurns<Message extends ChatMessage>({
   messages,
@@ -99,16 +118,16 @@ export function ConversationTurns<Message extends ChatMessage>({
   // in the duplicate-Connect-card report. Only the latest assistant
   // turn that introduced a given `(provider, app_id)` should keep the
   // interactive card; earlier turns drop that entry.
-  const latestPendingIntegrationIndexByKey = new Map<string, number>();
-  for (let i = 0; i < messages.length; i += 1) {
-    const m = messages[i];
-    if (!m || m.role !== "assistant") continue;
-    for (const entry of m.pendingIntegrations ?? []) {
-      const key = `${entry.provider_id.trim().toLowerCase()}|${entry.app_id.trim().toLowerCase()}`;
-      if (!key) continue;
-      latestPendingIntegrationIndexByKey.set(key, i);
-    }
-  }
+  // Memoized on `messages` so the arrays handed to AssistantTurn keep their
+  // identity between renders. Previously this ran per render and each turn got
+  // a fresh `.filter()` result, so the comparator's
+  // `prev.pendingIntegrations === next.pendingIntegrations` was never true --
+  // AssistantTurn's memo never hit once, and every message in the
+  // conversation re-rendered on every ChatPane render.
+  const dedupedPendingIntegrationsByIndex = useMemo(
+    () => dedupePendingIntegrationsByIndex(messages),
+    [messages],
+  );
   const renderedTurns = messages.map((message, index) => {
     const wrapperClassName = getMessageWrapperClassName?.(message)?.trim();
     const previousMessage = messages[index - 1];
@@ -163,18 +182,15 @@ export function ConversationTurns<Message extends ChatMessage>({
           showExecutionInternals={showExecutionInternals}
           text={message.text}
           tone={message.tone ?? "default"}
-          segments={message.segments ?? []}
-          executionItems={message.executionItems ?? []}
-          outputs={message.outputs ?? []}
-          pendingIntegrations={(message.pendingIntegrations ?? []).filter(
-            (entry) => {
-              const key = `${entry.provider_id.trim().toLowerCase()}|${entry.app_id.trim().toLowerCase()}`;
-              return latestPendingIntegrationIndexByKey.get(key) === index;
-            },
-          )}
-          proposedIntegrations={message.proposedIntegrations ?? []}
-          mcpAuthorizations={message.mcpAuthorizations ?? []}
-          publishedPosts={message.publishedPosts ?? []}
+          segments={message.segments ?? NO_SEGMENTS}
+          executionItems={message.executionItems ?? NO_EXECUTION_ITEMS}
+          outputs={message.outputs ?? NO_OUTPUTS}
+          pendingIntegrations={
+            dedupedPendingIntegrationsByIndex[index] ?? NO_PENDING_INTEGRATIONS
+          }
+          proposedIntegrations={message.proposedIntegrations ?? NO_PROPOSED_INTEGRATIONS}
+          mcpAuthorizations={message.mcpAuthorizations ?? NO_MCP_AUTHORIZATIONS}
+          publishedPosts={message.publishedPosts ?? NO_PUBLISHED_POSTS}
           onAfterIntegrationBind={onAfterIntegrationBind}
           onAfterIntegrationProposalConnected={onAfterIntegrationProposalConnected}
           onAfterMcpAuthorized={onAfterMcpAuthorized}
@@ -195,7 +211,9 @@ export function ConversationTurns<Message extends ChatMessage>({
               ? assistantFooterAccessory
               : null
           }
-          backgroundTaskReferences={message.backgroundTaskReferences ?? []}
+          backgroundTaskReferences={
+            message.backgroundTaskReferences ?? NO_BACKGROUND_TASK_REFERENCES
+          }
           onOpenBackgroundTaskReference={onOpenBackgroundTaskReference}
         />
       );
