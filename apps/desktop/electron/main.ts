@@ -122,6 +122,10 @@ process.on("unhandledRejection", (reason) => {
   recordMainProcessCrash("unhandledRejection", reason);
 });
 
+import {
+  readJsonStateFile,
+  writeJsonStateFileAtomically,
+} from "./json-state-file.js";
 import { electronClient } from "@better-auth/electron/client";
 import { storage as electronAuthStorage } from "@better-auth/electron/storage";
 import { createAuthClient } from "better-auth/client";
@@ -5345,18 +5349,20 @@ function logBffFetch(args: {
   });
 }
 
+// Thin wrappers over the shared, tested helpers in json-state-file.ts. Both
+// halves matter together: the write is atomic so a crash mid-write cannot
+// truncate the file, and the read quarantines an unparseable file instead of
+// letting the fallback-then-write cycle destroy it.
 async function readJsonFile<T>(filePath: string, fallback: T): Promise<T> {
-  try {
-    const raw = await fs.readFile(filePath, "utf-8");
-    return JSON.parse(raw) as T;
-  } catch {
-    return fallback;
-  }
+  return readJsonStateFile(filePath, fallback, {
+    log: (message) => {
+      void appendRuntimeLog(message).catch(() => undefined);
+    },
+  });
 }
 
 async function writeJsonFile(filePath: string, payload: unknown) {
-  await fs.mkdir(path.dirname(filePath), { recursive: true });
-  await fs.writeFile(filePath, JSON.stringify(payload, null, 2), "utf-8");
+  return writeJsonStateFileAtomically(filePath, payload);
 }
 
 async function loadBrowserPersistence() {
