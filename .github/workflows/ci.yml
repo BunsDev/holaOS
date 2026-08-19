@@ -47,6 +47,7 @@ env:
 jobs:
   desktop-typecheck:
     if: ${{ github.event_name != 'workflow_dispatch' }}
+    timeout-minutes: 20
     runs-on: ubuntu-latest
     env:
       ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
@@ -118,6 +119,7 @@ jobs:
 
   runtime-tests:
     if: ${{ github.event_name != 'workflow_dispatch' }}
+    timeout-minutes: 20
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -157,11 +159,39 @@ jobs:
       # pi already accepts Debian's `fdfind` as a system name for fd, so no
       # symlink is needed here.
       - name: Install search tools (rg, fd)
+        # rg and fd are real test dependencies here: pi-search-tool.ts and
+        # pi-find-tool.ts shell out to them, and pi.test.ts covers both.
+        #
+        # This step is what hung the job — twice, at 12+ minutes, never reaching
+        # the tests. It produced NO output before timing out, which rules out a
+        # slow mirror: apt was blocked before it made any request, waiting on
+        # the dpkg/apt lock that unattended-upgrades holds early in a runner's
+        # life. Acquire timeouts do not apply to a lock wait, which is why the
+        # first attempt at bounding this did not help.
+        #
+        # DPkg::Lock::Timeout is the setting that does apply. -qq is gone
+        # deliberately: it suppressed the "waiting for lock" line that would
+        # have identified this immediately.
+        timeout-minutes: 8
         run: |
-          if ! command -v rg >/dev/null || ! (command -v fd >/dev/null || command -v fdfind >/dev/null); then
-            sudo apt-get update -qq
-            sudo apt-get install -y -qq ripgrep fd-find
+          set -u
+          if command -v rg >/dev/null && (command -v fd >/dev/null || command -v fdfind >/dev/null); then
+            rg --version | head -1
+            exit 0
           fi
+          apt_opts="-o DPkg::Lock::Timeout=120 -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20"
+          for attempt in 1 2; do
+            echo "apt attempt ${attempt}"
+            if sudo apt-get ${apt_opts} update \
+               && sudo apt-get ${apt_opts} install -y ripgrep fd-find; then
+              break
+            fi
+            if [ "${attempt}" = "2" ]; then
+              echo "could not install search tools after 2 attempts" >&2
+              exit 1
+            fi
+            sleep 10
+          done
           rg --version | head -1
 
       # Covers every runtime package that isn't the api-server (which has its
@@ -188,6 +218,7 @@ jobs:
 
   sdk-app-sdk:
     if: ${{ github.event_name != 'workflow_dispatch' }}
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -218,6 +249,7 @@ jobs:
 
   runtime-api-server:
     if: ${{ github.event_name != 'workflow_dispatch' }}
+    timeout-minutes: 25
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -250,6 +282,7 @@ jobs:
 
   packages:
     if: ${{ github.event_name != 'workflow_dispatch' }}
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
