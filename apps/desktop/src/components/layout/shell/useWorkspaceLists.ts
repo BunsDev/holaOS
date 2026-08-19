@@ -349,6 +349,10 @@ export function useWorkspaceMainSessions(
     void load();
     const timer = window.setInterval(load, POLL_INTERVAL_MS);
 
+    // One reload is enough: the session is titled at creation now, so it is
+    // listable by the time this fires. The staggered follow-ups that used to be
+    // here were bounding a delay whose real cause was the missing title, and
+    // kept nine list calls per send alive for nothing once that was fixed.
     const onChanged = () => {
       void load();
     };

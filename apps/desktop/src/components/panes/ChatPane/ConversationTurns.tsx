@@ -245,11 +245,40 @@ export function ConversationTurns<Message extends ChatMessage>({
   });
 
   if (liveAssistantTurn) {
+    const liveTurnKey = liveAssistantTurn.id ?? "__live_assistant_turn__";
+    // Mirrors the spacing the committed turn will carry. Getting this wrong is
+    // a shift of exactly one `mt-2` (8px) at completion — the residual nudge
+    // left after the remount was fixed, because the live wrapper had no spacing
+    // and the committed one does.
+    const livePrevious = messages[messages.length - 1];
+    const liveIsFirstInAssistantGroup =
+      messages.length === 0 || livePrevious?.role === "user";
+    const liveIsGroupedContinuation =
+      livePrevious?.role === "assistant" && !liveIsFirstInAssistantGroup;
+    const liveSpacingClassName =
+      messages.length > 0 && !liveIsGroupedContinuation ? "mt-2" : "";
     renderedTurns.push(
-      // Same key the turn will carry once committed, so React reconciles the
-      // live node into the committed one instead of unmount+remount (which
-      // replays the entrance animation — the completion "flicker").
-      <Fragment key={liveAssistantTurn.id ?? "__live_assistant_turn__"}>
+      // Same key AND the same wrapper element the turn will carry once
+      // committed, so React reconciles the live node into the committed one
+      // instead of unmount+remount.
+      //
+      // The key alone was not enough, which is why the completion flicker
+      // outlived the comment that used to sit here: a keyed Fragment and a
+      // keyed <div> are different element TYPES, and React tears down and
+      // rebuilds across a type change no matter what the key says. The remount
+      // replayed `animate-in fade-in-0 slide-in-from-bottom-1` on the turn —
+      // a fade and a slide, which is the "blink + nudge" at the end of a turn.
+      //
+      // Matching the wrapper is what makes the key do its job.
+      <div
+        key={liveTurnKey}
+        data-message-id={liveAssistantTurn.id ?? undefined}
+        // Spacing only. The per-message decorator (search highlight and
+        // friends) needs a full Message and does not apply to a live turn, but
+        // the SPACING must match what the committed turn will have or the turn
+        // moves by 8px the moment it settles.
+        className={liveSpacingClassName || undefined}
+      >
         <AssistantTurn
           label={assistantLabel}
           mode={assistantMode}
@@ -264,10 +293,7 @@ export function ConversationTurns<Message extends ChatMessage>({
           onToggleTraceStep={onToggleTraceStep}
           onLinkClick={onLinkClick}
           onLocalLinkClick={onLocalLinkClick}
-          showAvatar={
-            messages.length === 0 ||
-            messages[messages.length - 1]?.role === "user"
-          }
+          showAvatar={liveIsFirstInAssistantGroup}
           workspaceId={workspaceId ?? null}
           harnessId={harnessId}
           assistantAvatar={assistantAvatar}
@@ -277,7 +303,7 @@ export function ConversationTurns<Message extends ChatMessage>({
           status={liveAssistantTurn.status ?? ""}
           footerAccessory={liveAssistantTurn.footerAccessory ?? null}
         />
-      </Fragment>,
+      </div>,
     );
   }
 
