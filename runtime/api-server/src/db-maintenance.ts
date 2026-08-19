@@ -36,6 +36,14 @@ export interface DbMaintenanceStore {
   // turn_request_snapshots — ~204KB/row, the largest row class in the DB, and
   // INSERT-only until this sweep learned to prune it.
   readonly turnRequestSnapshotRetentionPolicy: TurnRequestSnapshotRetentionPolicy;
+  listRootInactiveSessionsWithOutputEvents(params: {
+    inactiveBeforeIso: string;
+    limit: number;
+  }): Array<{ sessionId: string; count: number; updatedAt: string }>;
+  pruneSessionOutputEventsWholesale(params: {
+    sessionId: string;
+    limit: number;
+  }): number;
   countRootTurnRequestSnapshots(): number;
   pruneRootTurnRequestSnapshotsByAge(params: {
     cutoffIso: string;
@@ -136,6 +144,8 @@ export interface DbMaintenanceResult {
   deletedByAge: number;
   deletedByCap: number;
   /** Rows removed by the global ceiling, after the age + per-session phases. */
+  /** Events reclaimed from whole sessions that had gone inactive. */
+  deletedByInactiveSession: number;
   deletedByTotalCap: number;
   /** turn_request_snapshots removed by age or the global ceiling. */
   deletedSnapshots: number;
@@ -178,6 +188,7 @@ export async function runRuntimeDbMaintenance(
     aborted: false,
     deletedByAge: 0,
     deletedByCap: 0,
+    deletedByInactiveSession: 0,
     deletedByTotalCap: 0,
     deletedSnapshots: 0,
     compactionRequested: false,
@@ -258,6 +269,73 @@ export async function runRuntimeDbMaintenance(
     result.aborted = true;
     emitProgress("done", true);
     return result;
+  }
+
+  // Phase 0 — reclaim whole sessions that have gone quiet.
+  //
+  // Runs FIRST because the phases below choose the wrong victim. They prune by
+  // ROW age, and the oldest rows in the table are the early history of your
+  // longest-running conversations — so a session used daily gets truncated
+  // while one abandoned last month is untouched. The per-session phase is worse
+  // still: it orders by COUNT(*) DESC, going after the biggest and therefore
+  // most-used sessions first.
+  //
+  // Reclaiming a dead session costs the user very little: conversation TEXT
+  // lives in session_messages and is never pruned, so the chat still opens and
+  // reads normally. What goes is the execution trace — ~99% of the rows and
+  // effectively all of the bytes. Sessions with a live runtime state are
+  // excluded by the query regardless of their timestamp.
+  if (policy.maxAgeDays > 0 && !signal?.aborted) {
+    const inactiveBeforeIso = new Date(
+      Date.now() - policy.maxAgeDays * 24 * 60 * 60 * 1000,
+    ).toISOString();
+    let inactive: Array<{ sessionId: string; count: number }> = [];
+    try {
+      inactive = store.listRootInactiveSessionsWithOutputEvents({
+        inactiveBeforeIso,
+        limit: 200,
+      });
+    } catch (error) {
+      logger?.error?.("db maintenance: inactive-session scan failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+    for (const { sessionId } of inactive) {
+      if (signal?.aborted) {
+        break;
+      }
+      let consecutiveErrors = 0;
+      while (!signal?.aborted) {
+        let deleted = 0;
+        try {
+          deleted = store.pruneSessionOutputEventsWholesale({
+            sessionId,
+            limit: batchSize,
+          });
+          consecutiveErrors = 0;
+        } catch (error) {
+          if (!isTransientLock(error) || ++consecutiveErrors > MAX_CONSECUTIVE_ERRORS) {
+            logger?.error?.("db maintenance: inactive-session prune aborted", {
+              sessionId,
+              error: error instanceof Error ? error.message : String(error),
+            });
+            break;
+          }
+          if (!(await wait(pauseMs * consecutiveErrors))) {
+            break;
+          }
+          continue;
+        }
+        if (deleted === 0) {
+          break;
+        }
+        result.deletedByInactiveSession += deleted;
+        emitProgress("pruning", false);
+        if (!(await wait(pauseMs))) {
+          break;
+        }
+      }
+    }
   }
 
   // Phase 1 — age-based pruning (oldest events first, batched).
@@ -467,12 +545,14 @@ export async function runRuntimeDbMaintenance(
   result.aborted = Boolean(signal?.aborted);
 
   const totalDeleted =
+    result.deletedByInactiveSession +
     result.deletedByAge +
     result.deletedByCap +
     result.deletedByTotalCap +
     result.deletedSnapshots;
   if (totalDeleted > 0) {
     logger?.info?.("db maintenance: output-event retention sweep complete", {
+      deletedByInactiveSession: result.deletedByInactiveSession,
       deletedByAge: result.deletedByAge,
       deletedByCap: result.deletedByCap,
       deletedByTotalCap: result.deletedByTotalCap,

@@ -6090,6 +6090,77 @@ export class RuntimeStateStore {
     return result.changes ?? 0;
   }
 
+  /**
+   * Sessions that have gone quiet, oldest-inactive first, that still hold
+   * output events.
+   *
+   * The retention phases below prune by ROW age, which picks the wrong victim:
+   * the oldest rows in the table are the early history of your longest-running
+   * conversations, so a session you use daily gets truncated while one you
+   * abandoned last month is untouched. The per-session phase is worse still —
+   * it orders by COUNT(*) DESC, so it goes after your biggest, most-used
+   * sessions first.
+   *
+   * This gives the sweep a targeted first pass: reclaim whole dead sessions
+   * before touching a live one at all. Conversation TEXT lives in
+   * session_messages and is never pruned, so a reclaimed session still opens
+   * and reads normally — what it loses is the execution trace, which is ~99% of
+   * the rows and all of the bytes.
+   *
+   * A session with a live runtime state is excluded regardless of its
+   * timestamp: a run paused mid-turn can have an old `updated_at`, and pulling
+   * its trace out from under it would be the one case where this is visible.
+   */
+  listRootInactiveSessionsWithOutputEvents(params: {
+    inactiveBeforeIso: string;
+    limit: number;
+  }): Array<{ sessionId: string; count: number; updatedAt: string }> {
+    if (params.limit <= 0) {
+      return [];
+    }
+    return this.rootRuntimeDb()
+      .prepare<
+        [string, number],
+        { sessionId: string; count: number; updatedAt: string }
+      >(`
+        SELECT e.session_id AS sessionId,
+               COUNT(*) AS count,
+               s.updated_at AS updatedAt
+        FROM session_output_events e
+        JOIN agent_sessions s ON s.session_id = e.session_id
+        LEFT JOIN session_runtime_state r ON r.session_id = e.session_id
+        WHERE s.updated_at < ?
+          AND COALESCE(r.status, 'IDLE') NOT IN ('BUSY', 'QUEUED')
+        GROUP BY e.session_id
+        ORDER BY s.updated_at ASC
+        LIMIT ?
+      `)
+      .all(params.inactiveBeforeIso, params.limit);
+  }
+
+  /** Delete a session's output events wholesale, up to `limit` this call.
+   *  Batched so the sweep never holds the write lock. */
+  pruneSessionOutputEventsWholesale(params: {
+    sessionId: string;
+    limit: number;
+  }): number {
+    if (params.limit <= 0) {
+      return 0;
+    }
+    const result = this.rootRuntimeDb()
+      .prepare(`
+        DELETE FROM session_output_events
+        WHERE id IN (
+          SELECT id FROM session_output_events
+          WHERE session_id = ?
+          ORDER BY id ASC
+          LIMIT ?
+        )
+      `)
+      .run(params.sessionId, params.limit);
+    return result.changes ?? 0;
+  }
+
   countRootTurnRequestSnapshots(): number {
     const row = this.rootRuntimeDb()
       .prepare(`SELECT COUNT(*) AS n FROM turn_request_snapshots`)

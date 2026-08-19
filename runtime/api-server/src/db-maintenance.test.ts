@@ -34,6 +34,37 @@ class FakeStore implements DbMaintenanceStore {
     }
   }
 
+  // sessionId -> last-activity ISO. Absent = treated as active, so the existing
+  // cases keep measuring exactly what they measured before.
+  sessionActivity = new Map<string, string>();
+  liveSessions = new Set<string>();
+
+  listRootInactiveSessionsWithOutputEvents(params: {
+    inactiveBeforeIso: string;
+    limit: number;
+  }): Array<{ sessionId: string; count: number; updatedAt: string }> {
+    const rows: Array<{ sessionId: string; count: number; updatedAt: string }> = [];
+    for (const [sessionId, arr] of this.events) {
+      const updatedAt = this.sessionActivity.get(sessionId);
+      if (!updatedAt || updatedAt >= params.inactiveBeforeIso) continue;
+      if (this.liveSessions.has(sessionId)) continue;
+      rows.push({ sessionId, count: arr.length, updatedAt });
+    }
+    rows.sort((a, b) => a.updatedAt.localeCompare(b.updatedAt));
+    return rows.slice(0, params.limit);
+  }
+
+  pruneSessionOutputEventsWholesale(params: {
+    sessionId: string;
+    limit: number;
+  }): number {
+    const arr = this.events.get(params.sessionId);
+    if (!arr || arr.length === 0) return 0;
+    const removed = arr.splice(0, Math.min(params.limit, arr.length));
+    if (arr.length === 0) this.events.delete(params.sessionId);
+    return removed.length;
+  }
+
   countRootTurnRequestSnapshots(): number {
     return this.snapshots.length;
   }
@@ -553,4 +584,68 @@ test("snapshot retention is off when the policy is zeroed", () => {
     assert.equal(result.deletedSnapshots, 0);
     assert.equal(store.countRootTurnRequestSnapshots(), 50);
   });
+});
+
+
+test("dead sessions are reclaimed before a live one is touched", () => {
+  // The phases that existed before pruned by ROW age, which picks the wrong
+  // victim: the oldest rows belong to your longest-running conversations. A
+  // session used daily got truncated while one abandoned last month was left
+  // alone, and the per-session phase went after the BIGGEST sessions first.
+  const store = new FakeStore();
+  const old = new Date(Date.now() - 90 * 86_400_000).toISOString();
+  const recent = new Date().toISOString();
+
+  store.seed("dead", 30, recent);   // rows are NEW; the SESSION is old
+  store.sessionActivity.set("dead", old);
+  store.seed("alive", 30, old);     // rows are OLD; the session is in use
+  store.sessionActivity.set("alive", recent);
+
+  return runRuntimeDbMaintenance({ store, batchSize: 10 }).then((result) => {
+    assert.equal(result.deletedByInactiveSession, 30, "the dead session goes");
+    assert.equal(store.events.has("dead"), false);
+    assert.equal(
+      store.events.get("alive")?.length,
+      0,
+      "the live session's ancient rows still age out — but only after",
+    );
+  });
+});
+
+test("a session with a live run is never reclaimed, however old its timestamp", () => {
+  // A run paused mid-turn can carry an old updated_at. Pulling its trace out
+  // from under it is the one case where this would be visible to a user.
+  const store = new FakeStore();
+  const old = new Date(Date.now() - 90 * 86_400_000).toISOString();
+  store.seed("paused", 20, new Date().toISOString());
+  store.sessionActivity.set("paused", old);
+  store.liveSessions.add("paused");
+
+  return runRuntimeDbMaintenance({ store, batchSize: 10 }).then((result) => {
+    assert.equal(result.deletedByInactiveSession, 0);
+    assert.equal(store.events.get("paused")?.length, 20);
+  });
+});
+
+test("oldest-inactive sessions are reclaimed first", () => {
+  const store = new FakeStore();
+  const recent = new Date().toISOString();
+  const ages = [200, 120, 60];
+  ages.forEach((days, i) => {
+    store.seed(`s${i}`, 10, recent);
+    store.sessionActivity.set(
+      `s${i}`,
+      new Date(Date.now() - days * 86_400_000).toISOString(),
+    );
+  });
+
+  const scanned = store.listRootInactiveSessionsWithOutputEvents({
+    inactiveBeforeIso: new Date(Date.now() - 30 * 86_400_000).toISOString(),
+    limit: 10,
+  });
+  assert.deepEqual(
+    scanned.map((row) => row.sessionId),
+    ["s0", "s1", "s2"],
+    "most-dead first",
+  );
 });
