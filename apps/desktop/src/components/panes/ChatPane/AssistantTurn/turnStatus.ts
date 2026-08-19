@@ -143,6 +143,22 @@ export function resolveTurnStatus(
       tone: "default",
     };
   }
+  // The same rule the live branch above uses: a turn that ends with its
+  // streamed answer gets no anchor.
+  //
+  // This is the fix for the end-of-turn drift, and it is a presence rule rather
+  // than a labelling one. The anchor was absent while the answer streamed and
+  // present once the turn settled, so a row appeared at the exact moment the
+  // agent stopped typing and pushed the answer, its timestamp and everything
+  // below it down. Anything that exists in only one of the two states moves the
+  // layout on the transition; the duration is not worth that, and the trace is
+  // still one click away under Details.
+  //
+  // A turn that ends on an execution segment keeps its anchor in BOTH states,
+  // so it does not move either.
+  if (lastSegment?.kind === "output") {
+    return null;
+  }
   // Only turns that actually ran tools get a "Worked for" anchor; a plain text
   // reply shouldn't sprout a duration line it never had.
   if (items.length === 0) {
